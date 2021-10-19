@@ -333,6 +333,8 @@ static bool LoRa_available;
 		}
 
 		/* initialize SD card */
+		pinMode(PIN_SDCARD_MISO, INPUT_PULLUP);
+		//	pinMode(4, INPUT_PULLUP);
 		SDCard_available = SD_MMC.begin();
 		if (SDCard_available) {
 			any_println("SD card initialized");
