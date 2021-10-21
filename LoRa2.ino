@@ -12,6 +12,7 @@ LoRa sender and receiver
 #define WIFI_PASS "5654345234345"
 #define HTTP_URL "http://cowin.hku.hk:8765/"
 static char const SECRET_KEY[16] = "This is secret!";
+static char const AUTHENTICATION_DATA[] = "HKU CoWIN2 LoRa";
 #define MEASURE_PERIOD 10000 /* milliseconds */
 #define ACK_TIMEOUT 1000 /* milliseconds */
 #define RESEND_LIMIT 5
@@ -175,6 +176,7 @@ static bool LoRa_available;
 			#endif
 			return;
 		}
+		cipher.addAuthData(AUTHENTICATION_DATA, sizeof AUTHENTICATION_DATA);
 		struct PayloadSend ciphertext;
 		cipher.encrypt((uint8_t *)&ciphertext, (uint8_t const *)&cleantext, sizeof cleantext);
 		LoRa.write((uint8_t const *)&ciphertext, sizeof ciphertext);
@@ -252,6 +254,7 @@ static bool LoRa_available;
 			#endif
 			return;
 		}
+		cipher.addAuthData(AUTHENTICATION_DATA, sizeof AUTHENTICATION_DATA);
 		SerialNumber cleantext;
 		cipher.decrypt((uint8_t *)&cleantext, (uint8_t const *)&ciphertext, sizeof cleantext);
 		uint8_t tag[CIPHER_TAG_SIZE];
@@ -322,6 +325,11 @@ static bool LoRa_available;
 			OLED.setCursor(0, 0);
 		#endif
 
+		/* Initialize thermometer */
+		//	pinMode(PIN_THERMOMETER, INPUT);
+		thermometer.setWaitForConversion(true);
+		thermometer.setCheckForConversion(true);
+
 		/* Initialize LoRa */
 		SPI.begin(PIN_LORA_SCLK, PIN_LORA_MISO, PIN_LORA_MOSI, PIN_LORA_CS);
 		LoRa.setPins(PIN_LORA_CS, PIN_LORA_RST, PIN_LORA_DIO0);
@@ -333,7 +341,7 @@ static bool LoRa_available;
 		}
 
 		/* initialize SD card */
-		pinMode(PIN_SDCARD_MISO, INPUT_PULLUP);
+		//	pinMode(PIN_SDCARD_MISO, INPUT_PULLUP);
 		//	pinMode(4, INPUT_PULLUP);
 		SDCard_available = SD_MMC.begin();
 		if (SDCard_available) {
@@ -347,7 +355,7 @@ static bool LoRa_available;
 	}
 
 	void loop() {
-		if (!LoRa_available) {
+		if (!LoRa_available || !SDCard_available) {
 			#ifdef ENABLE_LED
 				digitalWrite(PIN_LED, HIGH);
 				delay(100);
@@ -446,6 +454,7 @@ static bool LoRa_available;
 			Serial_println("LoRa SEND ACK: unable to set IV");
 			return;
 		}
+		cipher.addAuthData(AUTHENTICATION_DATA, sizeof AUTHENTICATION_DATA);
 		SerialNumber ciphertext;
 		cipher.encrypt((uint8_t *)&ciphertext, (uint8_t const *)&cleantext, sizeof cleantext);
 		LoRa.write((uint8_t const *)&ciphertext, sizeof ciphertext);
@@ -470,11 +479,13 @@ static bool LoRa_available;
 		AuthCipher cipher;
 		if (!cipher.setKey((uint8_t const *)SECRET_KEY, sizeof SECRET_KEY)) {
 			Serial_println("LoRa SEND: fail to set cipher key");
+			return;
 		}
 		if (!cipher.setIV(IV, sizeof IV)) {
 			Serial_println("LoRa SEND: fail to set cipher IV");
 			return;
 		}
+		cipher.addAuthData(AUTHENTICATION_DATA, sizeof AUTHENTICATION_DATA);
 		struct PayloadSend cleantext;
 		cipher.decrypt((uint8_t *)&cleantext, (uint8_t const *)&ciphertext, sizeof cleantext);
 		uint8_t tag[CIPHER_TAG_SIZE];
@@ -589,27 +600,3 @@ static bool LoRa_available;
 		#endif
 	}
 #endif
-
-/* *** Document *** */
-/*
-Packages
-
-Type of packet (1 byte)
-	0: TIME
-	1: ACK
-	2: SEND
-Device ID (1 byte)
-	Each sender has unique ID.
-IV (16 bytes)
-	Randomize for each packet.
-Serial code (4 bytes, natural number)
-	Monotonic increasing
-	Allow roll-back only if all 16 MSB are 1.
-
-Upload data
-	1. Client: type SEND, 1 byte client ID, IV, encrypted serial code and value, cipher tag.
-	2. Server: type ACK, 1 byte client ID, IV, encrypted serial code, cipher tag.
-	3. If ACK is not receviced from server and number of tries is not over limit, loop back to step 1.
-Time Synchronization
-	1. Server: type 0 TIME, current time in ISO8601 format. (TODO)
-*/
