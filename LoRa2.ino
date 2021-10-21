@@ -2,17 +2,28 @@
 LoRa sender and receiver
 ********************* */
 
+#include <Arduino.h>
+#include <SPI.h>
+#include <LoRa.h>
+#include <RNG.h>
+#include <AES.h>
+#include <GCM.h>
+
+#define DEVICE_ID 1
 #define DEVICE_SENDER 0  /* DEVICE_TYPE = 0 for sender */
 #define DEVICE_RECEIVER 1  /* DEVICE_TYPE = 1 for receiver */
-#define DEVICE_TYPE DEVICE_SENDER
-#define DEVICE_ID 1
+#if DEVICE_ID == 0
+	#define DEVICE_TYPE DEVICE_RECEIVER
+#else
+	#define DEVICE_TYPE DEVICE_SENDER
+#endif
 #define NUMBER_OF_SENDERS 1
 
-#define WIFI_SSID "Mark1"
-#define WIFI_PASS "5654345234345"
+#define WIFI_SSID "SSID"
+#define WIFI_PASS "PASSWORD"
 #define HTTP_URL "http://cowin.hku.hk:8765/"
-static char const SECRET_KEY[16] = "This is secret!";
-static char const AUTHENTICATION_DATA[] = "HKU CoWIN2 LoRa";
+static char const SECRET_KEY[16] PROGMEM = "This is secret!";
+static char const AUTHENTICATION_DATA[] PROGMEM = "HKU CoWIN2 LoRa";
 #define MEASURE_PERIOD 10000 /* milliseconds */
 #define ACK_TIMEOUT 1000 /* milliseconds */
 #define RESEND_LIMIT 5
@@ -28,19 +39,7 @@ static char const AUTHENTICATION_DATA[] = "HKU CoWIN2 LoRa";
 #define OLED_HEIGHT 64
 #define COM_BAUD 115200
 
-#define PIN_LED         25
-#define PIN_OLED_SDA    21
-#define PIN_OLED_SCL    22
-#define PIN_SDCARD_CS   13
-#define PIN_SDCARD_MOSI 15
-#define PIN_SDCARD_MISO  2
-#define PIN_SDCARD_SCLK 14
-#define PIN_LORA_MOSI   27
-#define PIN_LORA_MISO   19
-#define PIN_LORA_SCLK    5
-#define PIN_LORA_CS     18
-#define PIN_LORA_RST    23
-#define PIN_LORA_DIO0   26
+#define PIN_LORA_RST 23  /* TTGO LoRa32 V2.1-1.6 version ? */
 #define OLED_I2C_ADDR 0x3C
 #define LORA_BAND 868E6
 
@@ -85,17 +84,10 @@ static char const AUTHENTICATION_DATA[] = "HKU CoWIN2 LoRa";
 #define CIPHER_IV_LENGTH 16
 #define CIPHER_TAG_SIZE 4
 
-#include <SPI.h>
-#include <LoRa.h>
-
 #ifdef ENABLE_OLED_OUTPUT
 	#include <Wire.h>
 	#include <Adafruit_SSD1306.h>
 #endif
-
-#include <RNG.h>
-#include <AES.h>
-#include <GCM.h>
 
 typedef unsigned long int Time;
 typedef uint8_t Device;
@@ -304,8 +296,8 @@ static bool LoRa_available;
 
 		/* initialize LED */
 		#ifdef ENABLE_LED
-			pinMode(PIN_LED, OUTPUT);
-			digitalWrite(PIN_LED, LOW);
+			pinMode(LED_BUILTIN, OUTPUT);
+			digitalWrite(LED_BUILTIN, LOW);
 		#endif
 
 		/* initialize serial port */
@@ -315,7 +307,7 @@ static bool LoRa_available;
 
 		/* initialize OLED */
 		#ifdef ENABLE_OLED_OUTPUT
-			Wire.begin(PIN_OLED_SDA, PIN_OLED_SCL);
+			Wire.begin(OLED_SDA, OLED_SCL);
 			OLED.begin(SSD1306_SWITCHCAPVCC, OLED_I2C_ADDR);
 			OLED.invertDisplay(false);
 			OLED.setRotation(2);
@@ -326,13 +318,14 @@ static bool LoRa_available;
 		#endif
 
 		/* Initialize thermometer */
-		//	pinMode(PIN_THERMOMETER, INPUT);
 		thermometer.setWaitForConversion(true);
 		thermometer.setCheckForConversion(true);
+		any_print("Thermometers: ");
+		any_println(thermometer.getDeviceCount());
 
 		/* Initialize LoRa */
-		SPI.begin(PIN_LORA_SCLK, PIN_LORA_MISO, PIN_LORA_MOSI, PIN_LORA_CS);
-		LoRa.setPins(PIN_LORA_CS, PIN_LORA_RST, PIN_LORA_DIO0);
+		SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
+		LoRa.setPins(LORA_CS, LORA_RST, LORA_IRQ);
 		LoRa_available = LoRa.begin(LORA_BAND) == 1;
 		if (LoRa_available) {
 			any_println("LoRa initialized");
@@ -341,8 +334,7 @@ static bool LoRa_available;
 		}
 
 		/* initialize SD card */
-		//	pinMode(PIN_SDCARD_MISO, INPUT_PULLUP);
-		//	pinMode(4, INPUT_PULLUP);
+		pinMode(SD_MISO, INPUT_PULLUP);
 		SDCard_available = SD_MMC.begin();
 		if (SDCard_available) {
 			any_println("SD card initialized");
@@ -357,9 +349,9 @@ static bool LoRa_available;
 	void loop() {
 		if (!LoRa_available || !SDCard_available) {
 			#ifdef ENABLE_LED
-				digitalWrite(PIN_LED, HIGH);
+				digitalWrite(LED_BUILTIN, HIGH);
 				delay(100);
-				digitalWrite(PIN_LED, LOW);
+				digitalWrite(LED_BUILTIN, LOW);
 				delay(100);
 			#endif
 			return;
@@ -381,14 +373,14 @@ static bool LoRa_available;
 		static float OLED_temperature;
 	#endif
 
-	void upload_WiFi(void) {
+	void upload_WiFi(Device const device, float const value) {
 		int const WiFi_status = WiFi.status();
 		if (WiFi_status != WL_CONNECTED) {
 			Serial_println("Upload no WiFi");
 			return;
 		}
 		HTTPClient HTTP_client;
-		String const URL = String(HTTP_URL);
+		String const URL = String(HTTP_URL) + String(device) + String("/") + String(value);
 		Serial_println(String("Upload to ") + URL);
 		HTTP_client.begin(URL);
 		HTTP_status = HTTP_client.GET();
@@ -443,8 +435,7 @@ static bool LoRa_available;
 		uint8_t IV[16];
 		RNG.rand(IV, sizeof IV);
 		LoRa.write(IV, sizeof IV);
-		SerialNumber cleantext;
-		cleantext = serial;
+		SerialNumber const cleantext = serial;
 		AuthCipher cipher;
 		if (!cipher.setKey((uint8_t const *)SECRET_KEY, sizeof SECRET_KEY)) {
 			Serial_println("LoRa SEND ACK: unable to set key");
@@ -471,7 +462,7 @@ static bool LoRa_available;
 			Serial_println("LoRa SEND: fail to read cipher IV");
 			return;
 		}
-		struct PayloadSend ciphertext;
+		char ciphertext[sizeof (PayloadSend)];
 		if (LoRa.readBytes((char *)&ciphertext, sizeof ciphertext) != sizeof ciphertext) {
 			Serial_println("LoRa SEND: fail to read serial number");
 			return;
@@ -506,7 +497,7 @@ static bool LoRa_available;
 		OLED_temperature = cleantext.temperature;
 
 		OLED_paint();
-		upload_WiFi();
+		upload_WiFi(device, cleantext.temperature);
 	}
 
 	static void LoRa_receive(int const packet_size) {
@@ -543,8 +534,8 @@ static bool LoRa_available;
 
 		/* initialize LED */
 		#ifdef ENABLE_LED
-			pinMode(PIN_LED, OUTPUT);
-			digitalWrite(PIN_LED, LOW);
+			pinMode(LED_BUILTIN, OUTPUT);
+			digitalWrite(LED_BUILTIN, LOW);
 		#endif
 
 		/* initialize serial port */
@@ -554,7 +545,7 @@ static bool LoRa_available;
 
 		/* initialize OLED */
 		#ifdef ENABLE_OLED_OUTPUT
-			Wire.begin(PIN_OLED_SDA, PIN_OLED_SCL);
+			Wire.begin(OLED_SDA, OLED_SCL);
 			OLED.begin(SSD1306_SWITCHCAPVCC, OLED_I2C_ADDR);
 			OLED.invertDisplay(false);
 			OLED.setRotation(2);
@@ -565,8 +556,8 @@ static bool LoRa_available;
 		#endif
 
 		/* Initialize LoRa */
-		SPI.begin(PIN_LORA_SCLK, PIN_LORA_MISO, PIN_LORA_MOSI, PIN_LORA_CS);
-		LoRa.setPins(PIN_LORA_CS, PIN_LORA_RST, PIN_LORA_DIO0);
+		SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
+		LoRa.setPins(LORA_CS, LORA_RST, LORA_IRQ);
 		LoRa_available = LoRa.begin(LORA_BAND) == 1;
 		if (LoRa_available) {
 			#ifdef ENABLE_LORA_CALLBACK
@@ -579,7 +570,7 @@ static bool LoRa_available;
 		}
 
 		/* initialize WiFi */
-		//WiFi.begin(WIFI_SSID, WIFI_PASS);
+		WiFi.begin(WIFI_SSID, WIFI_PASS);
 		OLED_println(WiFi_status_message(WiFi.status()));
 
 		OLED_display();
@@ -588,9 +579,9 @@ static bool LoRa_available;
 	void loop() {
 		if (!LoRa_available) {
 			#ifdef ENABLE_LED
-				digitalWrite(PIN_LED, HIGH);
+				digitalWrite(LED_BUILTIN, HIGH);
 				delay(100);
-				digitalWrite(PIN_LED, LOW);
+				digitalWrite(LED_BUILTIN, LOW);
 				delay(100);
 			#endif
 			return;
