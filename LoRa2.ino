@@ -9,7 +9,7 @@ LoRa sender and receiver
 #include <AES.h>
 #include <GCM.h>
 
-#define DEVICE_ID 0
+#define DEVICE_ID 1
 #define DEVICE_SENDER 0  /* DEVICE_TYPE = 0 for sender */
 #define DEVICE_RECEIVER 1  /* DEVICE_TYPE = 1 for receiver */
 #if DEVICE_ID == 0
@@ -24,6 +24,7 @@ LoRa sender and receiver
 #define HTTP_URL "http://cowin.hku.hk:8765/"
 static char const SECRET_KEY[16] PROGMEM = "This is secret!";
 static char const AUTHENTICATION_DATA[] PROGMEM = "HKU CoWIN2 LoRa";
+static char const LOG_FILE_PATH[] PROGMEM = "/log.txt";
 #define MEASURE_PERIOD 10000 /* milliseconds */
 #define ACK_TIMEOUT 1000 /* milliseconds */
 #define RESEND_LIMIT 5
@@ -216,6 +217,18 @@ static bool setup_error;
 				OLED_println(OLED_message);
 			#endif
 			send_LoRa();
+			#ifdef ENABLE_SD_CARD
+				File file = SD_MMC.open(LOG_FILE_PATH, FILE_APPEND);
+				if (!file) {
+					any_println("Failed to append file log.txt");
+				} else {
+					if (!file.print(temperature)) {
+						any_println("Failed to write file log.txt");
+					} else {
+						file.close();
+					}
+				}
+			#endif
 			OLED_display();
 		}
 	} measure_schedule;
