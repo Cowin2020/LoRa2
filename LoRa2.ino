@@ -9,7 +9,7 @@ LoRa sender and receiver
 #include <AES.h>
 #include <GCM.h>
 
-#define DEVICE_ID 1
+#define DEVICE_ID 0
 #define DEVICE_SENDER 0  /* DEVICE_TYPE = 0 for sender */
 #define DEVICE_RECEIVER 1  /* DEVICE_TYPE = 1 for receiver */
 #if DEVICE_ID == 0
@@ -32,7 +32,7 @@ static char const AUTHENTICATION_DATA[] PROGMEM = "HKU CoWIN2 LoRa";
 #define ENABLE_LED
 #define ENABLE_COM_OUTPUT
 #define ENABLE_OLED_OUTPUT
-// #define X_ENABLE_LORA_CALLBACK /* not working? */
+#define ENABLE_SD_CARD
 
 #define PIN_THERMOMETER 3
 #define OLED_WIDTH 128
@@ -125,18 +125,19 @@ public:
 	static Adafruit_SSD1306 OLED(OLED_WIDTH, OLED_HEIGHT);
 #endif
 
-static bool LoRa_available;
+static bool setup_error;
 
 #if DEVICE_TYPE == DEVICE_SENDER
 	#include <OneWire.h>
 	#include <DallasTemperature.h>
-	#include <SD_MMC.h>
+	#ifdef ENABLE_SD_CARD
+		#include <SD_MMC.h>
+	#endif
 
 	static OneWire onewire_thermometer(PIN_THERMOMETER);
 	static DallasTemperature thermometer(&onewire_thermometer);
 
 	static SerialNumber serial_current;
-	static bool SDCard_available;
 	static float temperature;
 	#ifdef ENABLE_OLED_OUTPUT
 		static char const *OLED_message;
@@ -289,8 +290,11 @@ static bool LoRa_available;
 
 	void setup() {
 		/* initialize internal states */
+		setup_error = false;
 		serial_current = 0;
-		OLED_message = "";
+		#ifdef ENABLE_OLED_OUTPUT
+			OLED_message = "";
+		#endif
 		measure_schedule.start(0);
 		RNG.begin("LoRa-2");
 
@@ -326,28 +330,30 @@ static bool LoRa_available;
 		/* Initialize LoRa */
 		SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
 		LoRa.setPins(LORA_CS, LORA_RST, LORA_IRQ);
-		LoRa_available = LoRa.begin(LORA_BAND) == 1;
-		if (LoRa_available) {
+		if (LoRa.begin(LORA_BAND) == 1) {
 			any_println("LoRa initialized");
 		} else {
+			setup_error = true;
 			any_println("LoRa uninitialized");
 		}
 
 		/* initialize SD card */
-		pinMode(SD_MISO, INPUT_PULLUP);
-		SDCard_available = SD_MMC.begin();
-		if (SDCard_available) {
-			any_println("SD card initialized");
-			Serial_println(String("SD Card type: ") + String(SD_MMC.cardType()));
-		} else {
-			any_println("SD card uninitialized");
-		}
+		#ifdef ENABLE_SD_CARD
+			pinMode(SD_MISO, INPUT_PULLUP);
+			if (SD_MMC.begin()) {
+				any_println("SD card initialized");
+				Serial_println(String("SD Card type: ") + String(SD_MMC.cardType()));
+			} else {
+				setup_error = true;
+				any_println("SD card uninitialized");
+			}
+		#endif
 
 		OLED_display();
 	}
 
 	void loop() {
-		if (!LoRa_available || !SDCard_available) {
+		if (setup_error) {
 			#ifdef ENABLE_LED
 				digitalWrite(LED_BUILTIN, HIGH);
 				delay(100);
@@ -558,14 +564,14 @@ static bool LoRa_available;
 		/* Initialize LoRa */
 		SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
 		LoRa.setPins(LORA_CS, LORA_RST, LORA_IRQ);
-		LoRa_available = LoRa.begin(LORA_BAND) == 1;
-		if (LoRa_available) {
+		if (LoRa.begin(LORA_BAND) == 1) {
 			#ifdef ENABLE_LORA_CALLBACK
 				LoRa.onReceive(LoRa_receive);
 				LoRa.receive();
 			#endif
 			any_println("LoRa initialized");
 		} else {
+			setup_error = true;
 			any_println("LoRa uninitialized");
 		}
 
@@ -577,7 +583,7 @@ static bool LoRa_available;
 	}
 
 	void loop() {
-		if (!LoRa_available) {
+		if (setup_error) {
 			#ifdef ENABLE_LED
 				digitalWrite(LED_BUILTIN, HIGH);
 				delay(100);
