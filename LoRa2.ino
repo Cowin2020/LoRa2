@@ -3,20 +3,10 @@ LoRa sender and receiver
 ********************* */
 
 #include <Arduino.h>
-#include <SPI.h>
-#include <LoRa.h>
-#include <RNG.h>
-#include <AES.h>
-#include <GCM.h>
 
-#define DEVICE_ID 1
+#define DEVICE_ID 0
 #define DEVICE_SENDER 0  /* DEVICE_TYPE = 0 for sender */
 #define DEVICE_RECEIVER 1  /* DEVICE_TYPE = 1 for receiver */
-#if DEVICE_ID == 0
-	#define DEVICE_TYPE DEVICE_RECEIVER
-#else
-	#define DEVICE_TYPE DEVICE_SENDER
-#endif
 #define NUMBER_OF_SENDERS 1
 
 #define WIFI_SSID "SSID"
@@ -44,8 +34,18 @@ static char const LOG_FILE_PATH[] PROGMEM = "/log.txt";
 #define OLED_I2C_ADDR 0x3C
 #define LORA_BAND 868E6
 
-#if DEVICE_TYPE != DEVICE_SENDER && DEVICE_TYPE != DEVICE_RECEIVER
-	#error Unknown DEVICE_TYPE
+#include "config.h"
+
+#include <SPI.h>
+#include <LoRa.h>
+#include <RNG.h>
+#include <AES.h>
+#include <GCM.h>
+
+#if DEVICE_ID == 0
+	#define DEVICE_TYPE DEVICE_RECEIVER
+#else
+	#define DEVICE_TYPE DEVICE_SENDER
 #endif
 
 #if defined(ENABLE_COM_OUTPUT) || defined(ENABLE_OLED_OUTPUT)
@@ -55,29 +55,6 @@ static char const LOG_FILE_PATH[] PROGMEM = "/log.txt";
 #if defined(ENABLE_LORA_CALLBACK) && defined(ENABLE_OLED_OUTPUT)
 	#undef ENABLE_LORA_CALLBACK
 #endif
-
-#ifdef ENABLE_COM_OUTPUT
-	#define Serial_print(x) Serial.print(x)
-	#define Serial_println(x) Serial.println(x)
-#else
-	#define Serial_print(x) {}
-	#define Serial_println(x) {}
-#endif
-
-#ifdef ENABLE_OLED_OUTPUT
-	#define OLED_home() {OLED.clearDisplay();OLED.setCursor(0,0);}
-	#define OLED_print(x) OLED.print(x)
-	#define OLED_println(x) OLED.println(x)
-	#define OLED_display() OLED.display()
-#else
-	#define OLED_home() {}
-	#define OLED_print(x) {}
-	#define OLED_println(x) {}
-	#define OLED_display() {}
-#endif
-
-#define any_print(x) {Serial_print(x);OLED_print(x);}
-#define any_println(x) {Serial_println(x);OLED_println(x);}
 
 #define PACKET_TIME   0
 #define PACKET_ACK    1
@@ -122,9 +99,55 @@ public:
 	}
 };
 
+#ifdef ENABLE_COM_OUTPUT
+	template <class T>
+	inline void Serial_print(T const x) {
+		Serial.print(x);
+	}
+	template <class T>
+	inline void Serial_println(T const x) {
+		Serial.println(x);
+	}
+#else
+	template <class T> inline void Serial_print(T const x) {}
+	template <class T> inline void Serial_println(T const x) {}
+#endif
+
 #ifdef ENABLE_OLED_OUTPUT
 	static Adafruit_SSD1306 OLED(OLED_WIDTH, OLED_HEIGHT);
+	inline void OLED_home(void) {
+		OLED.clearDisplay();
+		OLED.setCursor(0,0);
+	}
+	template <class T>
+	inline void OLED_print(T const x) {
+		OLED.print(x);
+	}
+	template <class T>
+	inline void OLED_println(T const x) {
+		OLED.println(x);
+	}
+	inline void OLED_display(void) {
+		OLED.display();
+	}
+#else
+	inline void OLED_home(void) {}
+	template <class T> inline void OLED_print(T const x) {}
+	template <class T> inline void OLED_println(T const x) {}
+	inline void OLED_display(void) {}
 #endif
+
+template <class T>
+inline void any_print(T const x) {
+	Serial_print(x);
+	OLED_print(x);
+}
+
+template <class T>
+inline void any_println(T const x) {
+	Serial_println(x);
+	OLED_println(x);
+}
 
 static bool setup_error;
 
@@ -511,9 +534,11 @@ static bool setup_error;
 		LoRa_send_ACK(device, cleantext.serial);
 
 		/* TODO: actually use the values */
-		OLED_device = device;
-		OLED_serial = cleantext.serial;
-		OLED_temperature = cleantext.temperature;
+		#ifdef ENABLE_OLED_OUTPUT
+			OLED_device = device;
+			OLED_serial = cleantext.serial;
+			OLED_temperature = cleantext.temperature;
+		#endif
 
 		OLED_paint();
 		upload_WiFi(device, cleantext.temperature);
