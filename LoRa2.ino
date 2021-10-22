@@ -407,10 +407,7 @@ static bool setup_error;
 		#endif
 
 		/* Initialize thermometer */
-		thermometer.setWaitForConversion(true);
-		thermometer.setCheckForConversion(true);
-		any_print("Thermometers: ");
-		any_println(thermometer.getDeviceCount());
+		thermometer.begin();
 
 		/* Initialize LoRa */
 		SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
@@ -424,14 +421,16 @@ static bool setup_error;
 
 		/* initialize SD card */
 		#ifdef ENABLE_SD_CARD
-			pinMode(SD_MISO, INPUT_PULLUP);
-			if (SD_MMC.begin()) {
-				any_println("SD card initialized");
-				Serial_println(String("SD Card type: ") + String(SD_MMC.cardType()));
-				dump_log_file();
-			} else {
-				setup_error = true;
-				any_println("SD card uninitialized");
+			if (!setup_error) {
+				pinMode(SD_MISO, INPUT_PULLUP);
+				if (SD_MMC.begin()) {
+					any_println("SD card initialized");
+					Serial_println(String("SD Card type: ") + String(SD_MMC.cardType()));
+					dump_log_file();
+				} else {
+					setup_error = true;
+					any_println("SD card uninitialized");
+				}
 			}
 		#endif
 
