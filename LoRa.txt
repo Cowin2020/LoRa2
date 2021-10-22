@@ -5,7 +5,7 @@ Data type and constants
 		1: ACK
 		2: SEND
 	Device ID (1 byte)
-		Each sender device has an unique ID.
+		Each sender device has a unique ID.
 	Initialization Vector (16 bytes)
 		Randomize for each packet.
 	Serial code (4 bytes, natural number)

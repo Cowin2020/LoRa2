@@ -1,0 +1,133 @@
+Configuration
+=============
+
+Create "config.h" in the root directory of repository.
+Define or undefine variables for configuration.
+
+DEVICE_ID
+---------
+
+ID of the arduino device
+
+Each device should have a unique ID.
+
+Type: Single byte integer
+Values:
+	0:     LoRa-WiFi gateway
+	1-255: terminal measuring device
+
+NUMBER_OF_SENDERS
+-----------------
+
+Number of terminal devices
+
+Values: 1-255
+
+WIFI_SSID and WIFI_PASS
+-----------------------
+
+WiFi access point and password.
+
+Type: C strings
+
+HTTP_URL
+--------
+
+URL to upload data
+
+Type: C string
+
+SECRET_KEY
+----------
+
+Secret key for encryption of LoRa communication
+
+Need to be same for both gateway and terminal sides.
+
+Type: anything with 16 bytes size
+
+AUTHENTICATION_DATA
+-------------------
+
+Identity to authenticate our devices
+
+Same for both gateway and terminal sides.
+
+Type: anything any size
+
+LOG_FILE_PATH
+-------------
+
+File name in SD card to store data in terminal device
+
+Type: C string
+
+MEASURE_PERIOD
+--------------
+
+Period in milliseconds to measure data
+
+Type: natural number
+
+ACK_TIMEOUT
+-----------
+
+Milliseconds to wait for ACK response
+
+Type: natural number
+
+RESEND_TIMES
+------------
+
+Times to resend data if ACK is not received
+
+Type: natural number
+
+ENABLE_LED
+----------
+
+Flash LED on error
+
+Type: defined or undefined
+
+ENABLE_COM_OUTPUT
+-----------------
+
+Output debug message to USB serial port
+
+Type: defined or undefined
+
+ENABLE_OLED_OUTPUT
+------------------
+
+Output message to OLED display
+
+Type: defined or undefined
+
+PIN_THERMOMETER
+---------------
+
+Pin number of thermometer data wire
+
+Type: natural number
+
+OLED_WIDTH and OLED_HEIGHT
+--------------------------
+
+The dimension of OLED display
+
+Type: positive numbers
+
+COM_BAUD
+--------
+
+Bit rate of USB serial port
+
+Type: positive number
+
+LORA_BAND
+---------
+
+Radio frequency used for LoRa
+
+Type: signed long int

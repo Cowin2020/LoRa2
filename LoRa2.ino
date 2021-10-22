@@ -11,14 +11,13 @@ LoRa sender and receiver
 
 #define WIFI_SSID "SSID"
 #define WIFI_PASS "PASSWORD"
-#define HTTP_URL "http://cowin.hku.hk:8765/"
+#define HTTP_URL "http://example.com/"
 static char const SECRET_KEY[16] PROGMEM = "This is secret!";
 static char const AUTHENTICATION_DATA[] PROGMEM = "HKU CoWIN2 LoRa";
 static char const LOG_FILE_PATH[] PROGMEM = "/log.txt";
-#define MEASURE_PERIOD 10000 /* milliseconds */
+#define MEASURE_PERIOD 60000 /* milliseconds */
 #define ACK_TIMEOUT 1000 /* milliseconds */
-#define RESEND_LIMIT 5
-#define IDLE_TIME 10000 /* milliseconds */
+#define RESEND_TIMES 4
 
 #define ENABLE_LED
 #define ENABLE_COM_OUTPUT
@@ -209,8 +208,9 @@ static bool setup_error;
 	public:
 		Resend(void) : Schedule(ACK_TIMEOUT) {}
 		void start(Time const now) {
+			if (!RESEND_TIMES) return;
 			Schedule::start(now);
-			counter = RESEND_LIMIT;
+			counter = RESEND_TIMES;
 		}
 		virtual void run(Time const now) {
 			Schedule::run(now);
@@ -408,7 +408,7 @@ static bool setup_error;
 	#include <WiFi.h>
 	#include <HTTPClient.h>
 
-	static int HTTP_status;
+	static signed int HTTP_status;
 	#ifdef ENABLE_OLED_OUTPUT
 		static uint8_t OLED_device;
 		static SerialNumber OLED_serial;
