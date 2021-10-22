@@ -5,8 +5,6 @@ LoRa sender and receiver
 #include <Arduino.h>
 
 #define DEVICE_ID 0
-#define DEVICE_SENDER 0  /* DEVICE_TYPE = 0 for sender */
-#define DEVICE_RECEIVER 1  /* DEVICE_TYPE = 1 for receiver */
 #define NUMBER_OF_SENDERS 1
 
 #define WIFI_SSID "SSID"
@@ -41,6 +39,8 @@ static char const LOG_FILE_PATH[] PROGMEM = "/log.txt";
 #include <AES.h>
 #include <GCM.h>
 
+#define DEVICE_SENDER 0
+#define DEVICE_RECEIVER 1
 #if DEVICE_ID == 0
 	#define DEVICE_TYPE DEVICE_RECEIVER
 #else
@@ -69,7 +69,7 @@ static char const LOG_FILE_PATH[] PROGMEM = "/log.txt";
 typedef unsigned long int Time;
 typedef uint8_t Device;
 typedef uint32_t SerialNumber;
-typedef GCM<AES128> AuthCipher;
+typedef class GCM<AES128> AuthCipher;
 
 struct PayloadSend {
 	SerialNumber serial;
@@ -99,54 +99,78 @@ public:
 };
 
 #ifdef ENABLE_COM_OUTPUT
-	template <class T>
-	inline void Serial_print(T const x) {
-		Serial.print(x);
-	}
-	template <class T>
-	inline void Serial_println(T const x) {
-		Serial.println(x);
-	}
+	#define DEFINE_FUNCTION(TYPE) \
+		static inline void Serial_print(TYPE x) { \
+			Serial.print(x); \
+		} \
+		static inline void Serial_println(TYPE x) { \
+			Serial.println(x); \
+		}
+	DEFINE_FUNCTION(char const * const)
+	DEFINE_FUNCTION(String const &)
+	DEFINE_FUNCTION(char const)
+	DEFINE_FUNCTION(uint8_t const)
+	DEFINE_FUNCTION(signed int const)
+	DEFINE_FUNCTION(double const)
+	#undef DEFINE_FUNCTION
 #else
-	template <class T> inline void Serial_print(T const x) {}
-	template <class T> inline void Serial_println(T const x) {}
+	#define DEFINE_FUNCTION(TYPE) \
+		static inline void Serial_print(TYPE x) {} \
+		static inline void Serial_println(TYPE x) {}
+	DEFINE_FUNCTION(char const * const)
+	DEFINE_FUNCTION(String const &)
+	DEFINE_FUNCTION(char const)
+	DEFINE_FUNCTION(uint8_t const)
+	DEFINE_FUNCTION(signed int const)
+	DEFINE_FUNCTION(double const)
+	#undef DEFINE_FUNCTION
 #endif
 
 #ifdef ENABLE_OLED_OUTPUT
 	static Adafruit_SSD1306 OLED(OLED_WIDTH, OLED_HEIGHT);
-	inline void OLED_home(void) {
+	static inline void OLED_home(void) {
 		OLED.clearDisplay();
 		OLED.setCursor(0,0);
 	}
-	template <class T>
-	inline void OLED_print(T const x) {
-		OLED.print(x);
-	}
-	template <class T>
-	inline void OLED_println(T const x) {
-		OLED.println(x);
-	}
-	inline void OLED_display(void) {
+	#define DEFINE_FUNCTION(TYPE) \
+		static inline void OLED_print(TYPE x) { \
+			OLED.print(x); \
+		} \
+		static inline void OLED_println(TYPE x) { \
+			OLED.println(x); \
+		}
+	DEFINE_FUNCTION(char const * const)
+	DEFINE_FUNCTION(uint8_t const)
+	DEFINE_FUNCTION(double const)
+	#undef DEFINE_FUNCTION
+	static inline void OLED_display(void) {
 		OLED.display();
 	}
 #else
-	inline void OLED_home(void) {}
-	template <class T> inline void OLED_print(T const x) {}
-	template <class T> inline void OLED_println(T const x) {}
-	inline void OLED_display(void) {}
+	static inline void OLED_home(void) {}
+	#define DEFINE_FUNCTION(TYPE) \
+		static inline void OLED_print(TYPE x) {} \
+		static inline void OLED_println(TYPE x) {}
+	DEFINE_FUNCTION(char const * const)
+	DEFINE_FUNCTION(uint8_t const)
+	DEFINE_FUNCTION(double const)
+	#undef DEFINE_FUNCTION
+	static inline void OLED_display(void) {}
 #endif
 
-template <class T>
-inline void any_print(T const x) {
-	Serial_print(x);
-	OLED_print(x);
-}
-
-template <class T>
-inline void any_println(T const x) {
-	Serial_println(x);
-	OLED_println(x);
-}
+#define DEFINE_FUNCTION(TYPE) \
+	static inline void any_print(TYPE x) { \
+		Serial_print(x); \
+		OLED_print(x); \
+	} \
+	static inline void any_println(TYPE x) { \
+		Serial_println(x); \
+		OLED_println(x); \
+	}
+DEFINE_FUNCTION(char const *)
+DEFINE_FUNCTION(uint8_t)
+DEFINE_FUNCTION(double const)
+#undef DEFINE_FUNCTION
 
 static bool setup_error;
 
@@ -157,8 +181,8 @@ static bool setup_error;
 		#include <SD_MMC.h>
 	#endif
 
-	static OneWire onewire_thermometer(PIN_THERMOMETER);
-	static DallasTemperature thermometer(&onewire_thermometer);
+	static class OneWire onewire_thermometer(PIN_THERMOMETER);
+	static class DallasTemperature thermometer(&onewire_thermometer);
 
 	static SerialNumber serial_current;
 	static float temperature;
@@ -166,6 +190,42 @@ static bool setup_error;
 		static char const *OLED_message;
 	#endif
 	static SerialNumber serial_wait;
+
+	#ifdef ENABLE_SD_CARD
+		static void dump_log_file(void) {
+			class File file;
+			signed int c;
+
+			Serial_println("Log file BEGIN");
+			file = SD_MMC.open(LOG_FILE_PATH, FILE_READ);
+			for (;;) {
+				c = file.read();
+				if (c < 0) break;
+				Serial_print(char(c));
+			}
+			Serial_println("");
+			file.close();
+
+			file = SD_MMC.open(LOG_FILE_PATH, FILE_WRITE);
+			file.close();
+			Serial_println("Log file END");
+		}
+
+		static void append_log_file(float const temperature) {
+			class File file = SD_MMC.open(LOG_FILE_PATH, FILE_APPEND);
+			if (!file) {
+				any_println("Failed to append file log.txt");
+			} else {
+				if (!file.println(temperature)) {
+					any_println("Failed to write file log.txt");
+				} else {
+					file.close();
+				}
+			}
+		}
+	#else
+		static inline void append_log_file(float const temperature) {}
+	#endif
 
 	static void send_LoRa_serial(SerialNumber const serial) {
 		LoRa.beginPacket();
@@ -240,18 +300,7 @@ static bool setup_error;
 				OLED_println(OLED_message);
 			#endif
 			send_LoRa();
-			#ifdef ENABLE_SD_CARD
-				File file = SD_MMC.open(LOG_FILE_PATH, FILE_APPEND);
-				if (!file) {
-					any_println("Failed to append file log.txt");
-				} else {
-					if (!file.print(temperature)) {
-						any_println("Failed to write file log.txt");
-					} else {
-						file.close();
-					}
-				}
-			#endif
+			append_log_file(temperature);
 			OLED_display();
 		}
 	} measure_schedule;
@@ -302,7 +351,7 @@ static bool setup_error;
 		resend_schedule.stop();
 	}
 
-	static void LoRa_receive(int const packet_size) {
+	static void LoRa_receive(signed int const packet_size) {
 		if (!packet_size) return;
 		uint8_t const packet_type = LoRa.read();
 		switch (packet_type) {
@@ -379,6 +428,7 @@ static bool setup_error;
 			if (SD_MMC.begin()) {
 				any_println("SD card initialized");
 				Serial_println(String("SD Card type: ") + String(SD_MMC.cardType()));
+				dump_log_file();
 			} else {
 				setup_error = true;
 				any_println("SD card uninitialized");
@@ -416,7 +466,7 @@ static bool setup_error;
 	#endif
 
 	void upload_WiFi(Device const device, float const value) {
-		int const WiFi_status = WiFi.status();
+		signed int const WiFi_status = WiFi.status();
 		if (WiFi_status != WL_CONNECTED) {
 			Serial_println("Upload no WiFi");
 			return;
@@ -429,7 +479,7 @@ static bool setup_error;
 		Serial_println(String("HTTP status: ") + String(HTTP_status));
 	}
 
-	String WiFi_status_message(int const WiFi_status) {
+	String WiFi_status_message(signed int const WiFi_status) {
 		switch (WiFi_status) {
 		case WL_NO_SHIELD:
 			return String("WiFi no shield");
@@ -544,7 +594,7 @@ static bool setup_error;
 		upload_WiFi(device, cleantext.temperature);
 	}
 
-	static void LoRa_receive(int const packet_size) {
+	static void LoRa_receive(signed int const packet_size) {
 		if (!packet_size) return;
 		uint8_t const packet_type = LoRa.read();
 		struct {
