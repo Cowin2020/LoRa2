@@ -6,16 +6,16 @@ Data type and constants
 		2: SEND
 	Device ID (1 byte)
 		Each sender device has a unique ID.
-	Initialization Vector (16 bytes)
-		Randomize for each packet.
+	Nonce (16 bytes)
+		Initialization vector randomize for each packet.
 	Serial code (4 bytes, natural number)
 		Monotonic increasing
 		Allow roll-back only if all 16 MSB are 1.
 
 Protocol of uploading data
 --------------------------
-	1. Client: type SEND, 1 byte client ID, IV, encrypted serial code and value, cipher tag.
-	2. Server: type ACK, 1 byte client ID, IV, encrypted serial code, cipher tag.
+	1. Client: type SEND, 1 byte client ID, nonce, encrypted serial code and value, cipher tag.
+	2. Server: type ACK, 1 byte client ID, nonce, encrypted serial code, cipher tag.
 	3. If ACK is not receviced from server and number of tries is not over limit, loop back to step 1.
 
 Protocol of time synchronization

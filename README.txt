@@ -46,15 +46,6 @@ Need to be same for both gateway and terminal sides.
 
 Type: anything with 16 bytes size
 
-AUTHENTICATION_DATA
--------------------
-
-Identity to authenticate our devices
-
-Same for both gateway and terminal sides.
-
-Type: anything any size
-
 LOG_FILE_PATH
 -------------
 

@@ -11,7 +11,6 @@ LoRa sender and receiver
 #define WIFI_PASS "PASSWORD"
 #define HTTP_URL "http://example.com/"
 static char const SECRET_KEY[16] PROGMEM = "This is secret!";
-static char const AUTHENTICATION_DATA[] PROGMEM = "HKU CoWIN2 LoRa";
 static char const LOG_FILE_PATH[] PROGMEM = "/log.txt";
 #define MEASURE_PERIOD 60000 /* milliseconds */
 #define ACK_TIMEOUT 1000 /* milliseconds */
@@ -183,6 +182,7 @@ static bool setup_error;
 
 	static class OneWire onewire_thermometer(PIN_THERMOMETER);
 	static class DallasTemperature thermometer(&onewire_thermometer);
+	//	static class SPIClass SPI_1(HSPI);
 
 	static SerialNumber serial_current;
 	static float temperature;
@@ -231,9 +231,9 @@ static bool setup_error;
 		LoRa.beginPacket();
 		LoRa.write(uint8_t(PACKET_SEND));
 		LoRa.write(uint8_t(DEVICE_ID));
-		uint8_t IV[16];
-		RNG.rand(IV, sizeof IV);
-		LoRa.write(IV, sizeof IV);
+		uint8_t nonce[16];
+		RNG.rand(nonce, sizeof nonce);
+		LoRa.write(nonce, sizeof nonce);
 		struct PayloadSend cleantext;
 		cleantext.serial = serial;
 		cleantext.temperature = temperature;
@@ -245,14 +245,13 @@ static bool setup_error;
 			#endif
 			return;
 		}
-		if (!cipher.setIV(IV, sizeof IV)) {
-			Serial_println("Unable to set IV");
+		if (!cipher.setIV(nonce, sizeof nonce)) {
+			Serial_println("Unable to set nonce");
 			#ifdef ENABLE_OLED_OUTPUT
-				OLED_message = "Unable to set IV";
+				OLED_message = "Unable to set nonce";
 			#endif
 			return;
 		}
-		cipher.addAuthData(AUTHENTICATION_DATA, sizeof AUTHENTICATION_DATA);
 		struct PayloadSend ciphertext;
 		cipher.encrypt((uint8_t *)&ciphertext, (uint8_t const *)&cleantext, sizeof cleantext);
 		LoRa.write((uint8_t const *)&ciphertext, sizeof ciphertext);
@@ -308,9 +307,9 @@ static bool setup_error;
 	static void LoRa_receive_ACK(void) {
 		Device const device = LoRa.read();
 		if (device != DEVICE_ID) return;
-		uint8_t IV[CIPHER_IV_LENGTH];
-		if (LoRa.readBytes(IV, sizeof IV) != sizeof IV) {
-			Serial_println("LoRa ACK: fail to read cipher IV");
+		uint8_t nonce[CIPHER_IV_LENGTH];
+		if (LoRa.readBytes(nonce, sizeof nonce) != sizeof nonce) {
+			Serial_println("LoRa ACK: fail to read cipher nonce");
 			return;
 		}
 		SerialNumber ciphertext;
@@ -325,14 +324,13 @@ static bool setup_error;
 				OLED_message = "LoRa ACK: fail to set cipher key";
 			#endif
 		}
-		if (!cipher.setIV(IV, sizeof IV)) {
-			Serial_println("LoRa ACK: fail to set cipher IV");
+		if (!cipher.setIV(nonce, sizeof nonce)) {
+			Serial_println("LoRa ACK: fail to set cipher nonce");
 			#ifdef ENABLE_OLED_OUTPUT
-				OLED_message = "LoRa ACK: fail to set cipher IV";
+				OLED_message = "LoRa ACK: fail to set cipher nonce";
 			#endif
 			return;
 		}
-		cipher.addAuthData(AUTHENTICATION_DATA, sizeof AUTHENTICATION_DATA);
 		SerialNumber cleantext;
 		cipher.decrypt((uint8_t *)&cleantext, (uint8_t const *)&ciphertext, sizeof cleantext);
 		uint8_t tag[CIPHER_TAG_SIZE];
@@ -407,29 +405,47 @@ static bool setup_error;
 		#endif
 
 		/* Initialize thermometer */
-		thermometer.begin();
+		if (!setup_error) {
+			//	pinMode(PIN_THERMOMETER, INPUT_PULLUP);
+			//	onewire_thermometer.reset();
+			//	thermometer.setWaitForConversion(true);
+			//	thermometer.setCheckForConversion(true);
+			thermometer.begin();
+			DeviceAddress thermometer_address;
+			if (thermometer.getAddress(thermometer_address, 0)) {
+				any_println("Thermometer 0 found");
+			} else {
+				setup_error = true;
+				any_println("Thermometer 0 not found");
+			}
+		}
 
 		/* Initialize LoRa */
-		SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
-		LoRa.setPins(LORA_CS, LORA_RST, LORA_IRQ);
-		if (LoRa.begin(LORA_BAND) == 1) {
-			any_println("LoRa initialized");
-		} else {
-			setup_error = true;
-			any_println("LoRa uninitialized");
+		if (!setup_error) {
+			SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
+			LoRa.setPins(LORA_CS, LORA_RST, LORA_IRQ);
+			if (LoRa.begin(LORA_BAND) == 1) {
+				any_println("LoRa initialized");
+			} else {
+				setup_error = true;
+				any_println("LoRa uninitialized");
+			}
 		}
 
 		/* initialize SD card */
 		#ifdef ENABLE_SD_CARD
 			if (!setup_error) {
 				pinMode(SD_MISO, INPUT_PULLUP);
+				//	pinMode(SD_MOSI, INPUT_PULLDOWN);
+				//	pinMode(SD_CS, INPUT_PULLDOWN);
+				//	SPI_1.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
 				if (SD_MMC.begin()) {
 					any_println("SD card initialized");
 					Serial_println(String("SD Card type: ") + String(SD_MMC.cardType()));
 					dump_log_file();
 				} else {
 					setup_error = true;
-					any_println("SD card uninitialized");
+					any_println("SD card not initialized");
 				}
 			}
 		#endif
@@ -523,20 +539,19 @@ static bool setup_error;
 		LoRa.beginPacket();
 		LoRa.write(uint8_t(PACKET_ACK));
 		LoRa.write(uint8_t(device));
-		uint8_t IV[16];
-		RNG.rand(IV, sizeof IV);
-		LoRa.write(IV, sizeof IV);
+		uint8_t nonce[16];
+		RNG.rand(nonce, sizeof nonce);
+		LoRa.write(nonce, sizeof nonce);
 		SerialNumber const cleantext = serial;
 		AuthCipher cipher;
 		if (!cipher.setKey((uint8_t const *)SECRET_KEY, sizeof SECRET_KEY)) {
-			Serial_println("LoRa SEND ACK: unable to set key");
+			Serial_println("LoRa SEND ACK: unable to set cipher key");
 			return;
 		}
-		if (!cipher.setIV(IV, sizeof IV)) {
-			Serial_println("LoRa SEND ACK: unable to set IV");
+		if (!cipher.setIV(nonce, sizeof nonce)) {
+			Serial_println("LoRa SEND ACK: unable to set nonce");
 			return;
 		}
-		cipher.addAuthData(AUTHENTICATION_DATA, sizeof AUTHENTICATION_DATA);
 		SerialNumber ciphertext;
 		cipher.encrypt((uint8_t *)&ciphertext, (uint8_t const *)&cleantext, sizeof cleantext);
 		LoRa.write((uint8_t const *)&ciphertext, sizeof ciphertext);
@@ -548,9 +563,9 @@ static bool setup_error;
 
 	static void LoRa_receive_SEND(void) {
 		Device const device = LoRa.read();
-		uint8_t IV[CIPHER_IV_LENGTH];
-		if (LoRa.readBytes(IV, sizeof IV) != sizeof IV) {
-			Serial_println("LoRa SEND: fail to read cipher IV");
+		uint8_t nonce[CIPHER_IV_LENGTH];
+		if (LoRa.readBytes(nonce, sizeof nonce) != sizeof nonce) {
+			Serial_println("LoRa SEND: fail to read cipher nonce");
 			return;
 		}
 		char ciphertext[sizeof (PayloadSend)];
@@ -563,11 +578,10 @@ static bool setup_error;
 			Serial_println("LoRa SEND: fail to set cipher key");
 			return;
 		}
-		if (!cipher.setIV(IV, sizeof IV)) {
-			Serial_println("LoRa SEND: fail to set cipher IV");
+		if (!cipher.setIV(nonce, sizeof nonce)) {
+			Serial_println("LoRa SEND: fail to set cipher nonce");
 			return;
 		}
-		cipher.addAuthData(AUTHENTICATION_DATA, sizeof AUTHENTICATION_DATA);
 		struct PayloadSend cleantext;
 		cipher.decrypt((uint8_t *)&cleantext, (uint8_t const *)&ciphertext, sizeof cleantext);
 		uint8_t tag[CIPHER_TAG_SIZE];
@@ -600,7 +614,6 @@ static bool setup_error;
 			SerialNumber serial;
 			float temperature;
 		} ciphertext, cleantext;
-		uint8_t IV[CIPHER_TAG_SIZE];
 
 		switch (packet_type) {
 		case PACKET_SEND:
