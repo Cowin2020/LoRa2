@@ -105,7 +105,7 @@ public:
 		static inline void Serial_println(TYPE x) { \
 			Serial.println(x); \
 		}
-	DEFINE_FUNCTION(char const * const)
+	DEFINE_FUNCTION(char const *const)
 	DEFINE_FUNCTION(String const &)
 	DEFINE_FUNCTION(char const)
 	DEFINE_FUNCTION(uint8_t const)
@@ -116,7 +116,7 @@ public:
 	#define DEFINE_FUNCTION(TYPE) \
 		static inline void Serial_print(TYPE x) {} \
 		static inline void Serial_println(TYPE x) {}
-	DEFINE_FUNCTION(char const * const)
+	DEFINE_FUNCTION(char const *const)
 	DEFINE_FUNCTION(String const &)
 	DEFINE_FUNCTION(char const)
 	DEFINE_FUNCTION(uint8_t const)
@@ -177,12 +177,12 @@ static bool setup_error;
 	#include <OneWire.h>
 	#include <DallasTemperature.h>
 	#ifdef ENABLE_SD_CARD
-		#include <SD_MMC.h>
+		#include <SD.h>
 	#endif
 
 	static class OneWire onewire_thermometer(PIN_THERMOMETER);
 	static class DallasTemperature thermometer(&onewire_thermometer);
-	//	static class SPIClass SPI_1(HSPI);
+	static class SPIClass SPI_1(HSPI);
 
 	static SerialNumber serial_current;
 	static float temperature;
@@ -197,7 +197,7 @@ static bool setup_error;
 			signed int c;
 
 			Serial_println("Log file BEGIN");
-			file = SD_MMC.open(LOG_FILE_PATH, FILE_READ);
+			file = SD.open(LOG_FILE_PATH, FILE_READ);
 			for (;;) {
 				c = file.read();
 				if (c < 0) break;
@@ -206,13 +206,13 @@ static bool setup_error;
 			Serial_println("");
 			file.close();
 
-			file = SD_MMC.open(LOG_FILE_PATH, FILE_WRITE);
+			file = SD.open(LOG_FILE_PATH, FILE_WRITE);
 			file.close();
 			Serial_println("Log file END");
 		}
 
 		static void append_log_file(float const temperature) {
-			class File file = SD_MMC.open(LOG_FILE_PATH, FILE_APPEND);
+			class File file = SD.open(LOG_FILE_PATH, FILE_APPEND);
 			if (!file) {
 				any_println("Failed to append file log.txt");
 			} else {
@@ -406,10 +406,6 @@ static bool setup_error;
 
 		/* Initialize thermometer */
 		if (!setup_error) {
-			//	pinMode(PIN_THERMOMETER, INPUT_PULLUP);
-			//	onewire_thermometer.reset();
-			//	thermometer.setWaitForConversion(true);
-			//	thermometer.setCheckForConversion(true);
 			thermometer.begin();
 			DeviceAddress thermometer_address;
 			if (thermometer.getAddress(thermometer_address, 0)) {
@@ -436,16 +432,14 @@ static bool setup_error;
 		#ifdef ENABLE_SD_CARD
 			if (!setup_error) {
 				pinMode(SD_MISO, INPUT_PULLUP);
-				//	pinMode(SD_MOSI, INPUT_PULLDOWN);
-				//	pinMode(SD_CS, INPUT_PULLDOWN);
-				//	SPI_1.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
-				if (SD_MMC.begin()) {
+				SPI_1.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
+				if (SD.begin(SD_CS, SPI_1)) {
 					any_println("SD card initialized");
-					Serial_println(String("SD Card type: ") + String(SD_MMC.cardType()));
+					Serial_println(String("SD Card type: ") + String(SD.cardType()));
 					dump_log_file();
 				} else {
 					setup_error = true;
-					any_println("SD card not initialized");
+					any_println("SD card uninitialized");
 				}
 			}
 		#endif
