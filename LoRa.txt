@@ -10,7 +10,7 @@ Data type and constants
 		Initialization vector randomize for each packet.
 	Serial code (4 bytes, natural number)
 		Monotonic increasing
-		Allow roll-back only if all 16 MSB are 1.
+		Allow roll-back only if MSB is 1.
 
 Protocol of uploading data
 --------------------------

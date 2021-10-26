@@ -57,7 +57,7 @@ static char const LOG_FILE_PATH[] PROGMEM = "/log.txt";
 #define PACKET_TIME   0
 #define PACKET_ACK    1
 #define PACKET_SEND   2
-#define CIPHER_IV_LENGTH 16
+#define CIPHER_IV_LENGTH 12
 #define CIPHER_TAG_SIZE 4
 
 #ifdef ENABLE_OLED_OUTPUT
@@ -231,7 +231,7 @@ static bool setup_error;
 		LoRa.beginPacket();
 		LoRa.write(uint8_t(PACKET_SEND));
 		LoRa.write(uint8_t(DEVICE_ID));
-		uint8_t nonce[16];
+		uint8_t nonce[CIPHER_IV_LENGTH];
 		RNG.rand(nonce, sizeof nonce);
 		LoRa.write(nonce, sizeof nonce);
 		struct PayloadSend cleantext;
@@ -533,7 +533,7 @@ static bool setup_error;
 		LoRa.beginPacket();
 		LoRa.write(uint8_t(PACKET_ACK));
 		LoRa.write(uint8_t(device));
-		uint8_t nonce[16];
+		uint8_t nonce[CIPHER_IV_LENGTH];
 		RNG.rand(nonce, sizeof nonce);
 		LoRa.write(nonce, sizeof nonce);
 		SerialNumber const cleantext = serial;
