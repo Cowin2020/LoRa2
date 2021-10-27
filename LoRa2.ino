@@ -80,11 +80,14 @@ protected:
 	bool enable;
 	Time head;
 	Time period;
+	Time margin;
 public:
-	Schedule(Time const initial_period) : enable(false), head(0), period(initial_period) {}
-	void start(Time const now) {
+	Schedule(Time const initial_period) :
+		enable(false), head(0), period(initial_period), margin(0) {}
+	void start(Time const now, Time const addition_period = 0) {
 		enable = true;
 		head = now;
+		margin = addition_period;
 	}
 	void stop(void) {
 		enable = false;
@@ -93,7 +96,7 @@ public:
 		head = now;
 	}
 	void tick(Time const now) {
-		if (enable && (now < head || head+period <= now)) run(now);
+		if (enable && (now < head || head+period+margin <= now)) run(now);
 	}
 };
 
@@ -105,23 +108,25 @@ public:
 		static inline void Serial_println(TYPE x) { \
 			Serial.println(x); \
 		}
-	DEFINE_FUNCTION(char const *const)
-	DEFINE_FUNCTION(String const &)
 	DEFINE_FUNCTION(char const)
 	DEFINE_FUNCTION(uint8_t const)
 	DEFINE_FUNCTION(signed int const)
+	DEFINE_FUNCTION(uint32_t const)
 	DEFINE_FUNCTION(double const)
+	DEFINE_FUNCTION(char const *const)
+	DEFINE_FUNCTION(String const &)
 	#undef DEFINE_FUNCTION
 #else
 	#define DEFINE_FUNCTION(TYPE) \
 		static inline void Serial_print(TYPE x) {} \
 		static inline void Serial_println(TYPE x) {}
-	DEFINE_FUNCTION(char const *const)
-	DEFINE_FUNCTION(String const &)
 	DEFINE_FUNCTION(char const)
 	DEFINE_FUNCTION(uint8_t const)
 	DEFINE_FUNCTION(signed int const)
+	DEFINE_FUNCTION(uint32_t const)
 	DEFINE_FUNCTION(double const)
+	DEFINE_FUNCTION(char const *const)
+	DEFINE_FUNCTION(String const &)
 	#undef DEFINE_FUNCTION
 #endif
 
@@ -138,9 +143,12 @@ public:
 		static inline void OLED_println(TYPE x) { \
 			OLED.println(x); \
 		}
-	DEFINE_FUNCTION(char const * const)
 	DEFINE_FUNCTION(uint8_t const)
+	DEFINE_FUNCTION(signed int const)
+	DEFINE_FUNCTION(uint32_t const)
 	DEFINE_FUNCTION(double const)
+	DEFINE_FUNCTION(char const *const)
+	DEFINE_FUNCTION(String const &)
 	#undef DEFINE_FUNCTION
 	static inline void OLED_display(void) {
 		OLED.display();
@@ -150,9 +158,12 @@ public:
 	#define DEFINE_FUNCTION(TYPE) \
 		static inline void OLED_print(TYPE x) {} \
 		static inline void OLED_println(TYPE x) {}
-	DEFINE_FUNCTION(char const * const)
 	DEFINE_FUNCTION(uint8_t const)
+	DEFINE_FUNCTION(signed int const)
+	DEFINE_FUNCTION(uint32_t const)
 	DEFINE_FUNCTION(double const)
+	DEFINE_FUNCTION(char const *const)
+	DEFINE_FUNCTION(String const &)
 	#undef DEFINE_FUNCTION
 	static inline void OLED_display(void) {}
 #endif
@@ -168,6 +179,7 @@ public:
 	}
 DEFINE_FUNCTION(char const *)
 DEFINE_FUNCTION(uint8_t)
+DEFINE_FUNCTION(uint32_t)
 DEFINE_FUNCTION(double const)
 #undef DEFINE_FUNCTION
 
@@ -268,8 +280,10 @@ static bool setup_error;
 		Resend(void) : Schedule(ACK_TIMEOUT) {}
 		void start(Time const now) {
 			if (!RESEND_TIMES) return;
-			Schedule::start(now);
 			counter = RESEND_TIMES;
+			uint8_t margin;
+			RNG.rand(&margin, sizeof margin);
+			Schedule::start(now, margin | 0xFF);
 		}
 		virtual void run(Time const now) {
 			Schedule::run(now);
@@ -281,7 +295,10 @@ static bool setup_error;
 	static void send_LoRa(void) {
 		send_LoRa_serial(serial_current);
 		serial_wait = serial_current;
-		++serial_current;
+		if (serial_current & ~(~(SerialNumber)0 >> 1))
+			serial_current = 0;
+		else
+			++serial_current;
 		resend_schedule.start(millis());
 	}
 
@@ -293,6 +310,8 @@ static bool setup_error;
 			OLED_home();
 			thermometer.requestTemperatures();
 			temperature = thermometer.getTempCByIndex(0);
+			any_print("Serial: ");
+			any_println(serial_current);
 			any_print("Temperature: ");
 			any_println(temperature);
 			#ifdef ENABLE_OLED_OUTPUT
@@ -467,6 +486,7 @@ static bool setup_error;
 	#include <WiFi.h>
 	#include <HTTPClient.h>
 
+	static SerialNumber serial_last[NUMBER_OF_SENDERS];
 	static signed int HTTP_status;
 	#ifdef ENABLE_OLED_OUTPUT
 		static uint8_t OLED_device;
@@ -588,9 +608,14 @@ static bool setup_error;
 			return;
 		}
 
+		if (cleantext.serial < serial_last[device-1] && !(serial_last[device-1] & ~(~(SerialNumber)0 >> 1))) {
+			Serial_println("LoRa SEND: serial number out of order");
+			/* TODO: handle situation */
+		}
+
 		LoRa_send_ACK(device, cleantext.serial);
 
-		/* TODO: actually use the values */
+		serial_last[device-1] = cleantext.serial;
 		#ifdef ENABLE_OLED_OUTPUT
 			OLED_device = device;
 			OLED_serial = cleantext.serial;
@@ -612,7 +637,7 @@ static bool setup_error;
 		switch (packet_type) {
 		case PACKET_SEND:
 			if (packet_size != 1 + 1 + CIPHER_IV_LENGTH + sizeof (struct PayloadSend) + CIPHER_TAG_SIZE) {
-				Serial_print("LoRa SEND: incorrect packet size");
+				Serial_print("LoRa SEND: incorrect packet size: ");
 				Serial_println(packet_size);
 				break;
 			}
@@ -630,7 +655,10 @@ static bool setup_error;
 
 	void setup() {
 		/* initialize static variables */
+		setup_error = false;
 		HTTP_status = 0;
+		for (size_t i=0; i<NUMBER_OF_SENDERS; ++i)
+			serial_last[i] = 0;
 
 		/* initialize LED */
 		#ifdef ENABLE_LED

@@ -6,7 +6,7 @@ Data type and constants
 		2: SEND
 	Device ID (1 byte)
 		Each sender device has a unique ID.
-	Nonce (16 bytes)
+	Nonce (96 bits, 12 bytes)
 		Initialization vector randomize for each packet.
 	Serial code (4 bytes, natural number)
 		Monotonic increasing
