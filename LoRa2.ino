@@ -504,7 +504,7 @@ static bool setup_error;
 		static float OLED_temperature;
 	#endif
 
-	void upload_WiFi(Device const device, SerialNumber const serial, float const value) {
+	static void upload_WiFi(Device const device, SerialNumber const serial, float const value) {
 		signed int const WiFi_status = WiFi.status();
 		if (WiFi_status != WL_CONNECTED) {
 			Serial_println("Upload no WiFi");
@@ -521,7 +521,7 @@ static bool setup_error;
 		Serial_println(HTTP_status);
 	}
 
-	String WiFi_status_message(signed int const WiFi_status) {
+	static String WiFi_status_message(signed int const WiFi_status) {
 		switch (WiFi_status) {
 		case WL_NO_SHIELD:
 			return String("WiFi no shield");
