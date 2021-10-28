@@ -13,13 +13,14 @@ LoRa sender and receiver
 static char const SECRET_KEY[16] PROGMEM = "This is secret!";
 static char const LOG_FILE_PATH[] PROGMEM = "/log.txt";
 #define MEASURE_PERIOD 60000 /* milliseconds */
-#define ACK_TIMEOUT 1000 /* milliseconds */
+#define ACK_TIMEOUT 5000 /* milliseconds */
 #define RESEND_TIMES 4
 
 #define ENABLE_LED
 #define ENABLE_COM_OUTPUT
 #define ENABLE_OLED_OUTPUT
 #define ENABLE_SD_CARD
+//	#define ENABLE_LORA_CALLBACK
 
 #define PIN_THERMOMETER 3
 #define OLED_WIDTH 128
@@ -50,9 +51,9 @@ static char const LOG_FILE_PATH[] PROGMEM = "/log.txt";
 	#define ENABLE_OUTPUT
 #endif
 
-#if defined(ENABLE_LORA_CALLBACK) && defined(ENABLE_OLED_OUTPUT)
-	#undef ENABLE_LORA_CALLBACK
-#endif
+//	#if defined(ENABLE_LORA_CALLBACK) && defined(ENABLE_OLED_OUTPUT)
+//		#undef ENABLE_LORA_CALLBACK
+//	#endif
 
 #define PACKET_TIME   0
 #define PACKET_ACK    1
@@ -61,7 +62,7 @@ static char const LOG_FILE_PATH[] PROGMEM = "/log.txt";
 #define CIPHER_TAG_SIZE 4
 
 #ifdef ENABLE_OLED_OUTPUT
-	#include <Wire.h>
+	//	#include <Wire.h>
 	#include <Adafruit_SSD1306.h>
 #endif
 
@@ -82,8 +83,9 @@ protected:
 	Time period;
 	Time margin;
 public:
-	Schedule(Time const initial_period) :
-		enable(false), head(0), period(initial_period), margin(0) {}
+	Schedule(Time const initial_period)
+	: enable(false), head(0), period(initial_period), margin(0)
+	{}
 	void start(Time const now, Time const addition_period = 0) {
 		enable = true;
 		head = now;
@@ -206,12 +208,10 @@ static bool setup_error;
 	#ifdef ENABLE_SD_CARD
 		static void dump_log_file(void) {
 			class File file;
-			signed int c;
-
 			Serial_println("Log file BEGIN");
 			file = SD.open(LOG_FILE_PATH, FILE_READ);
 			for (;;) {
-				c = file.read();
+				signed int const c = file.read();
 				if (c < 0) break;
 				Serial_print(char(c));
 			}
@@ -270,7 +270,7 @@ static bool setup_error;
 		uint8_t tag[CIPHER_TAG_SIZE];
 		cipher.computeTag(tag, sizeof tag);
 		LoRa.write((uint8_t const *)&tag, sizeof tag);
-		LoRa.endPacket(false);
+		LoRa.endPacket(true);
 	}
 
 	static class Resend : public Schedule {
@@ -283,7 +283,7 @@ static bool setup_error;
 			counter = RESEND_TIMES;
 			uint8_t margin;
 			RNG.rand(&margin, sizeof margin);
-			Schedule::start(now, margin | 0xFF);
+			Schedule::start(now, margin & 0xFF);
 		}
 		virtual void run(Time const now) {
 			Schedule::run(now);
@@ -413,7 +413,7 @@ static bool setup_error;
 
 		/* initialize OLED */
 		#ifdef ENABLE_OLED_OUTPUT
-			Wire.begin(OLED_SDA, OLED_SCL);
+			//	Wire.begin(OLED_SDA, OLED_SCL);
 			OLED.begin(SSD1306_SWITCHCAPVCC, OLED_I2C_ADDR);
 			OLED.invertDisplay(false);
 			OLED.setRotation(2);
@@ -440,6 +440,10 @@ static bool setup_error;
 			SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
 			LoRa.setPins(LORA_CS, LORA_RST, LORA_IRQ);
 			if (LoRa.begin(LORA_BAND) == 1) {
+				#ifdef ENABLE_LORA_CALLBACK
+					LoRa.onReceive(LoRa_receive);
+					LoRa.receive();
+				#endif
 				any_println("LoRa initialized");
 			} else {
 				setup_error = true;
@@ -470,16 +474,21 @@ static bool setup_error;
 		if (setup_error) {
 			#ifdef ENABLE_LED
 				digitalWrite(LED_BUILTIN, HIGH);
-				delay(100);
+				delay(200);
 				digitalWrite(LED_BUILTIN, LOW);
-				delay(100);
+				delay(200);
 			#endif
 			return;
 		}
-		unsigned long int const now = millis();
-		measure_schedule.tick(now);
-		resend_schedule.tick(now);
-		LoRa_receive(LoRa.parsePacket());
+		#ifndef ENABLE_LORA_CALLBACK
+			LoRa_receive(LoRa.parsePacket());
+		#endif
+		measure_schedule.tick(millis());
+		RNG.loop();
+		#ifndef ENABLE_LORA_CALLBACK
+			LoRa_receive(LoRa.parsePacket());
+		#endif
+		resend_schedule.tick(millis());
 		RNG.loop();
 	}
 #elif DEVICE_TYPE == DEVICE_RECEIVER
@@ -572,7 +581,7 @@ static bool setup_error;
 		uint8_t tag[CIPHER_TAG_SIZE];
 		cipher.computeTag(tag, sizeof tag);
 		LoRa.write((uint8_t const *)&tag, sizeof tag);
-		LoRa.endPacket(false);
+		LoRa.endPacket(true);
 	}
 
 	static void LoRa_receive_SEND(void) {
@@ -607,14 +616,12 @@ static bool setup_error;
 			Serial_println("LoRa SEND: invalid cipher tag");
 			return;
 		}
-
 		if (cleantext.serial < serial_last[device-1] && !(serial_last[device-1] & ~(~(SerialNumber)0 >> 1))) {
 			Serial_println("LoRa SEND: serial number out of order");
 			/* TODO: handle situation */
 		}
 
 		LoRa_send_ACK(device, cleantext.serial);
-
 		serial_last[device-1] = cleantext.serial;
 		#ifdef ENABLE_OLED_OUTPUT
 			OLED_device = device;
@@ -673,7 +680,7 @@ static bool setup_error;
 
 		/* initialize OLED */
 		#ifdef ENABLE_OLED_OUTPUT
-			Wire.begin(OLED_SDA, OLED_SCL);
+			//	Wire.begin(OLED_SDA, OLED_SCL);
 			OLED.begin(SSD1306_SWITCHCAPVCC, OLED_I2C_ADDR);
 			OLED.invertDisplay(false);
 			OLED.setRotation(2);
@@ -708,9 +715,9 @@ static bool setup_error;
 		if (setup_error) {
 			#ifdef ENABLE_LED
 				digitalWrite(LED_BUILTIN, HIGH);
-				delay(100);
+				delay(200);
 				digitalWrite(LED_BUILTIN, LOW);
-				delay(100);
+				delay(200);
 			#endif
 			return;
 		}
