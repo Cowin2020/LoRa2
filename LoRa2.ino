@@ -9,11 +9,12 @@ LoRa sender and receiver
 
 #define WIFI_SSID "SSID"
 #define WIFI_PASS "PASSWORD"
-#define HTTP_URL "http://example.com/"
+#define HTTP_URL_FORMAT "http://example.com/%1$u/%2$lu/%3$F"
+#define HTTP_URL_LENGTH 256
 static char const SECRET_KEY[16] PROGMEM = "This is secret!";
 static char const LOG_FILE_PATH[] PROGMEM = "/log.txt";
 #define MEASURE_PERIOD 60000 /* milliseconds */
-#define ACK_TIMEOUT 5000 /* milliseconds */
+#define ACK_TIMEOUT 1000 /* milliseconds */
 #define RESEND_TIMES 4
 
 #define ENABLE_LED
@@ -503,18 +504,21 @@ static bool setup_error;
 		static float OLED_temperature;
 	#endif
 
-	void upload_WiFi(Device const device, float const value) {
+	void upload_WiFi(Device const device, SerialNumber const serial, float const value) {
 		signed int const WiFi_status = WiFi.status();
 		if (WiFi_status != WL_CONNECTED) {
 			Serial_println("Upload no WiFi");
 			return;
 		}
 		HTTPClient HTTP_client;
-		String const URL = String(HTTP_URL) + String(device) + String("/") + String(value);
-		Serial_println(String("Upload to ") + URL);
+		char URL[HTTP_URL_LENGTH];
+		snprintf(URL, sizeof URL, HTTP_URL_FORMAT, device, serial, value);
+		Serial_print("Upload to ");
+		Serial_println(URL);
 		HTTP_client.begin(URL);
 		HTTP_status = HTTP_client.GET();
-		Serial_println(String("HTTP status: ") + String(HTTP_status));
+		Serial_print("HTTP status: ");
+		Serial_println(HTTP_status);
 	}
 
 	String WiFi_status_message(signed int const WiFi_status) {
@@ -630,7 +634,7 @@ static bool setup_error;
 		#endif
 
 		OLED_paint();
-		upload_WiFi(device, cleantext.temperature);
+		upload_WiFi(device, cleantext.serial, cleantext.temperature);
 	}
 
 	static void LoRa_receive(signed int const packet_size) {
