@@ -441,10 +441,6 @@ static bool setup_error;
 			SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
 			LoRa.setPins(LORA_CS, LORA_RST, LORA_IRQ);
 			if (LoRa.begin(LORA_BAND) == 1) {
-				#ifdef ENABLE_LORA_CALLBACK
-					LoRa.onReceive(LoRa_receive);
-					LoRa.receive();
-				#endif
 				any_println("LoRa initialized");
 			} else {
 				setup_error = true;
@@ -481,14 +477,10 @@ static bool setup_error;
 			#endif
 			return;
 		}
-		#ifndef ENABLE_LORA_CALLBACK
-			LoRa_receive(LoRa.parsePacket());
-		#endif
+		LoRa_receive(LoRa.parsePacket());
 		measure_schedule.tick(millis());
 		RNG.loop();
-		#ifndef ENABLE_LORA_CALLBACK
-			LoRa_receive(LoRa.parsePacket());
-		#endif
+		LoRa_receive(LoRa.parsePacket());
 		resend_schedule.tick(millis());
 		RNG.loop();
 	}
@@ -725,8 +717,11 @@ static bool setup_error;
 			#endif
 			return;
 		}
-		#ifndef ENABLE_LORA_CALLBACK
+		#ifdef ENABLE_LORA_CALLBACK
+			delay(60000); // long sleep
+		#else
 			LoRa_receive(LoRa.parsePacket());
 		#endif
+		RNG.loop();
 	}
 #endif
