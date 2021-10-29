@@ -26,16 +26,21 @@ Values: 1-255
 WIFI_SSID and WIFI_PASS
 -----------------------
 
-WiFi access point and password.
+WiFi access point and password
 
 Type: C strings
 
-HTTP_URL
---------
+HTTP_URL_FORMAT
+---------------
 
-URL to upload data
+Printf format string of URL to upload data
 
 Type: C string
+
+HTTP_URL_LENGTH
+---------------
+
+Maximum length of HTTP URL string
 
 SECRET_KEY
 ----------
