@@ -9,7 +9,7 @@ LoRa sender and receiver
 
 #define WIFI_SSID "SSID"
 #define WIFI_PASS "PASSWORD"
-#define HTTP_URL_FORMAT "http://example.com/%1$u/%2$lu/%3$F"
+#define HTTP_URL_FORMAT "http://www.example.com/%1$u/%2$lu/%3$F"
 #define HTTP_URL_LENGTH 256
 static char const SECRET_KEY[16] PROGMEM = "This is secret!";
 static char const LOG_FILE_PATH[] PROGMEM = "/log.txt";
@@ -21,7 +21,6 @@ static char const LOG_FILE_PATH[] PROGMEM = "/log.txt";
 #define ENABLE_COM_OUTPUT
 #define ENABLE_OLED_OUTPUT
 #define ENABLE_SD_CARD
-//	#define ENABLE_LORA_CALLBACK
 
 #define PIN_THERMOMETER 3
 #define OLED_WIDTH 128
@@ -51,10 +50,6 @@ static char const LOG_FILE_PATH[] PROGMEM = "/log.txt";
 #if defined(ENABLE_COM_OUTPUT) || defined(ENABLE_OLED_OUTPUT)
 	#define ENABLE_OUTPUT
 #endif
-
-//	#if defined(ENABLE_LORA_CALLBACK) && defined(ENABLE_OLED_OUTPUT)
-//		#undef ENABLE_LORA_CALLBACK
-//	#endif
 
 #define PACKET_TIME   0
 #define PACKET_ACK    1
@@ -690,10 +685,6 @@ static bool setup_error;
 		SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
 		LoRa.setPins(LORA_CS, LORA_RST, LORA_IRQ);
 		if (LoRa.begin(LORA_BAND) == 1) {
-			#ifdef ENABLE_LORA_CALLBACK
-				LoRa.onReceive(LoRa_receive);
-				LoRa.receive();
-			#endif
 			any_println("LoRa initialized");
 		} else {
 			setup_error = true;
@@ -717,11 +708,7 @@ static bool setup_error;
 			#endif
 			return;
 		}
-		#ifdef ENABLE_LORA_CALLBACK
-			delay(60000); // long sleep
-		#else
-			LoRa_receive(LoRa.parsePacket());
-		#endif
+		LoRa_receive(LoRa.parsePacket());
 		RNG.loop();
 	}
 #endif
