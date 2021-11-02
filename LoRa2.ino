@@ -100,10 +100,10 @@ public:
 
 #ifdef ENABLE_COM_OUTPUT
 	#define DEFINE_FUNCTION(TYPE) \
-		static inline void Serial_print(TYPE x) { \
+		inline static void Serial_print(TYPE x) { \
 			Serial.print(x); \
 		} \
-		static inline void Serial_println(TYPE x) { \
+		inline static void Serial_println(TYPE x) { \
 			Serial.println(x); \
 		}
 	DEFINE_FUNCTION(char const)
@@ -116,8 +116,8 @@ public:
 	#undef DEFINE_FUNCTION
 #else
 	#define DEFINE_FUNCTION(TYPE) \
-		static inline void Serial_print(TYPE x) {} \
-		static inline void Serial_println(TYPE x) {}
+		inline static void Serial_print(TYPE x) {} \
+		inline static void Serial_println(TYPE x) {}
 	DEFINE_FUNCTION(char const)
 	DEFINE_FUNCTION(uint8_t const)
 	DEFINE_FUNCTION(signed int const)
@@ -130,15 +130,25 @@ public:
 
 #ifdef ENABLE_OLED_OUTPUT
 	static Adafruit_SSD1306 OLED(OLED_WIDTH, OLED_HEIGHT);
-	static inline void OLED_home(void) {
+	static void OLED_initialize(void) {
+		//	Wire.begin(OLED_SDA, OLED_SCL);
+		OLED.begin(SSD1306_SWITCHCAPVCC, OLED_I2C_ADDR);
+		OLED.invertDisplay(false);
+		OLED.setRotation(2);
+		OLED.setTextSize(1);
+		OLED.setTextColor(WHITE, BLACK);
+		OLED.clearDisplay();
+		OLED.setCursor(0, 0);
+	}
+	inline static void OLED_home(void) {
 		OLED.clearDisplay();
 		OLED.setCursor(0,0);
 	}
 	#define DEFINE_FUNCTION(TYPE) \
-		static inline void OLED_print(TYPE x) { \
+		inline static void OLED_print(TYPE x) { \
 			OLED.print(x); \
 		} \
-		static inline void OLED_println(TYPE x) { \
+		inline static void OLED_println(TYPE x) { \
 			OLED.println(x); \
 		}
 	DEFINE_FUNCTION(uint8_t const)
@@ -148,14 +158,15 @@ public:
 	DEFINE_FUNCTION(char const *const)
 	DEFINE_FUNCTION(String const &)
 	#undef DEFINE_FUNCTION
-	static inline void OLED_display(void) {
+	inline static void OLED_display(void) {
 		OLED.display();
 	}
 #else
-	static inline void OLED_home(void) {}
+	inline static void OLED_initialize(void) {}
+	inline static void OLED_home(void) {}
 	#define DEFINE_FUNCTION(TYPE) \
-		static inline void OLED_print(TYPE x) {} \
-		static inline void OLED_println(TYPE x) {}
+		inline static void OLED_print(TYPE x) {} \
+		inline static void OLED_println(TYPE x) {}
 	DEFINE_FUNCTION(uint8_t const)
 	DEFINE_FUNCTION(signed int const)
 	DEFINE_FUNCTION(uint32_t const)
@@ -163,15 +174,15 @@ public:
 	DEFINE_FUNCTION(char const *const)
 	DEFINE_FUNCTION(String const &)
 	#undef DEFINE_FUNCTION
-	static inline void OLED_display(void) {}
+	inline static void OLED_display(void) {}
 #endif
 
 #define DEFINE_FUNCTION(TYPE) \
-	static inline void any_print(TYPE x) { \
+	inline static void any_print(TYPE x) { \
 		Serial_print(x); \
 		OLED_print(x); \
 	} \
-	static inline void any_println(TYPE x) { \
+	inline static void any_println(TYPE x) { \
 		Serial_println(x); \
 		OLED_println(x); \
 	}
@@ -180,6 +191,34 @@ DEFINE_FUNCTION(uint8_t)
 DEFINE_FUNCTION(uint32_t)
 DEFINE_FUNCTION(double const)
 #undef DEFINE_FUNCTION
+
+bool LoRa_initialize(void) {
+	SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
+	LoRa.setPins(LORA_CS, LORA_RST, LORA_IRQ);
+	if (LoRa.begin(LORA_BAND) == 1) {
+		any_println("LoRa initialized");
+		return true;
+	} else {
+		any_println("LoRa uninitialized");
+		return false;
+	}
+}
+
+#ifdef ENABLE_LED
+	static void LED_initialize(void) {
+		pinMode(LED_BUILTIN, OUTPUT);
+		digitalWrite(LED_BUILTIN, LOW);
+	}
+	static void LED_flash(void) {
+		digitalWrite(LED_BUILTIN, HIGH);
+		delay(200);
+		digitalWrite(LED_BUILTIN, LOW);
+		delay(200);
+	}
+#else
+	inline static void LED_initialize(void) {}
+	inline static void LED_flash(void) {}
+#endif
 
 static bool setup_error;
 
@@ -232,7 +271,7 @@ static bool setup_error;
 			}
 		}
 	#else
-		static inline void append_log_file(float const temperature) {}
+		inline static void append_log_file(float const temperature) {}
 	#endif
 
 	static void send_LoRa_serial(SerialNumber const serial) {
@@ -397,10 +436,7 @@ static bool setup_error;
 		RNG.begin("LoRa-2");
 
 		/* initialize LED */
-		#ifdef ENABLE_LED
-			pinMode(LED_BUILTIN, OUTPUT);
-			digitalWrite(LED_BUILTIN, LOW);
-		#endif
+		LED_initialize();
 
 		/* initialize serial port */
 		#ifdef ENABLE_COM_OUTPUT
@@ -408,16 +444,7 @@ static bool setup_error;
 		#endif
 
 		/* initialize OLED */
-		#ifdef ENABLE_OLED_OUTPUT
-			//	Wire.begin(OLED_SDA, OLED_SCL);
-			OLED.begin(SSD1306_SWITCHCAPVCC, OLED_I2C_ADDR);
-			OLED.invertDisplay(false);
-			OLED.setRotation(2);
-			OLED.setTextSize(1);
-			OLED.setTextColor(WHITE, BLACK);
-			OLED.clearDisplay();
-			OLED.setCursor(0, 0);
-		#endif
+		OLED_initialize();
 
 		/* Initialize thermometer */
 		if (!setup_error) {
@@ -433,14 +460,7 @@ static bool setup_error;
 
 		/* Initialize LoRa */
 		if (!setup_error) {
-			SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
-			LoRa.setPins(LORA_CS, LORA_RST, LORA_IRQ);
-			if (LoRa.begin(LORA_BAND) == 1) {
-				any_println("LoRa initialized");
-			} else {
-				setup_error = true;
-				any_println("LoRa uninitialized");
-			}
+			setup_error = LoRa_initialize();
 		}
 
 		/* initialize SD card */
@@ -464,12 +484,7 @@ static bool setup_error;
 
 	void loop() {
 		if (setup_error) {
-			#ifdef ENABLE_LED
-				digitalWrite(LED_BUILTIN, HIGH);
-				delay(200);
-				digitalWrite(LED_BUILTIN, LOW);
-				delay(200);
-			#endif
+			LED_flash();
 			return;
 		}
 		LoRa_receive(LoRa.parsePacket());
@@ -627,11 +642,6 @@ static bool setup_error;
 	static void LoRa_receive(signed int const packet_size) {
 		if (!packet_size) return;
 		uint8_t const packet_type = LoRa.read();
-		struct {
-			SerialNumber serial;
-			float temperature;
-		} ciphertext, cleantext;
-
 		switch (packet_type) {
 		case PACKET_SEND:
 			if (packet_size != 1 + 1 + CIPHER_IV_LENGTH + sizeof (struct PayloadSend) + CIPHER_TAG_SIZE) {
@@ -642,7 +652,7 @@ static bool setup_error;
 			LoRa_receive_SEND();
 			break;
 		default:
-			Serial_print("LoRa: incorrect packet type");
+			Serial_print("LoRa: incorrect packet type: ");
 			Serial_println(packet_type);
 		}
 
@@ -652,17 +662,14 @@ static bool setup_error;
 	}
 
 	void setup() {
-		/* initialize static variables */
+		/* initialize internal states */
 		setup_error = false;
 		HTTP_status = 0;
 		for (size_t i=0; i<NUMBER_OF_SENDERS; ++i)
 			serial_last[i] = 0;
 
 		/* initialize LED */
-		#ifdef ENABLE_LED
-			pinMode(LED_BUILTIN, OUTPUT);
-			digitalWrite(LED_BUILTIN, LOW);
-		#endif
+		LED_initialize();
 
 		/* initialize serial port */
 		#ifdef ENABLE_COM_OUTPUT
@@ -670,42 +677,25 @@ static bool setup_error;
 		#endif
 
 		/* initialize OLED */
-		#ifdef ENABLE_OLED_OUTPUT
-			//	Wire.begin(OLED_SDA, OLED_SCL);
-			OLED.begin(SSD1306_SWITCHCAPVCC, OLED_I2C_ADDR);
-			OLED.invertDisplay(false);
-			OLED.setRotation(2);
-			OLED.setTextSize(1);
-			OLED.setTextColor(WHITE, BLACK);
-			OLED.clearDisplay();
-			OLED.setCursor(0, 0);
-		#endif
+		OLED_initialize();
 
 		/* Initialize LoRa */
-		SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
-		LoRa.setPins(LORA_CS, LORA_RST, LORA_IRQ);
-		if (LoRa.begin(LORA_BAND) == 1) {
-			any_println("LoRa initialized");
-		} else {
-			setup_error = true;
-			any_println("LoRa uninitialized");
+		if (!setup_error) {
+			setup_error = LoRa_initialize();
 		}
 
 		/* initialize WiFi */
-		WiFi.begin(WIFI_SSID, WIFI_PASS);
-		OLED_println(WiFi_status_message(WiFi.status()));
+		if (!setup_error) {
+			WiFi.begin(WIFI_SSID, WIFI_PASS);
+			OLED_println(WiFi_status_message(WiFi.status()));
+		}
 
 		OLED_display();
 	}
 
 	void loop() {
 		if (setup_error) {
-			#ifdef ENABLE_LED
-				digitalWrite(LED_BUILTIN, HIGH);
-				delay(200);
-				digitalWrite(LED_BUILTIN, LOW);
-				delay(200);
-			#endif
+			LED_flash();
 			return;
 		}
 		LoRa_receive(LoRa.parsePacket());
