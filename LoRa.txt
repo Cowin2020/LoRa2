@@ -11,13 +11,15 @@ Data type and constants
 	Serial code (4 bytes, natural number)
 		Monotonic increasing
 		Allow roll-back only if MSB is 1.
-
-Protocol of uploading data
---------------------------
-	1. Client: type SEND, 1 byte client ID, nonce, encrypted serial code and value, cipher tag.
-	2. Server: type ACK, 1 byte client ID, nonce, encrypted serial code, cipher tag.
-	3. If ACK is not receviced from server and number of tries is not over limit, loop back to step 1.
+	Time (20 bytes, ASCII string)
+		ISO8601 format with "Z" timezone
 
 Protocol of time synchronization
 --------------------------------
-	1. Server: type 0 TIME, current time in ISO8601 format. (TODO)
+	1. Server: type 0 TIME, nonce, encrypted current time, authentication tag.
+
+Protocol of uploading data
+--------------------------
+	1. Client: type SEND, 1 byte client ID, nonce, encrypted serial code and value, authentication tag.
+	2. Server: type ACK, 1 byte client ID, nonce, encrypted serial code, authentication tag.
+	3. If ACK is not receviced from server and number of tries is not over limit, loop back to step 1.

@@ -9,18 +9,21 @@ LoRa sender and receiver
 
 #define WIFI_SSID "SSID"
 #define WIFI_PASS "PASSWORD"
-#define HTTP_URL_FORMAT "http://www.example.com/%1$u/%2$lu/%3$F"
-#define HTTP_URL_LENGTH 256
-static char const SECRET_KEY[16] PROGMEM = "This is secret!";
-static char const LOG_FILE_PATH[] PROGMEM = "/log.txt";
-#define MEASURE_PERIOD 60000 /* milliseconds */
-#define ACK_TIMEOUT 1000 /* milliseconds */
+#define HTTP_UPLOAD_FORMAT "http://www.example.com/%1$u/%2$lu/%3$F"
+#define HTTP_UPLOAD_LENGTH 256
+#define NTP_SERVER "stdtime.gov.hk"
+#define SECRET_KEY "This is secret!"
+#define LOG_FILE_PATH "/log.txt"
+#define SYNCHONIZE_INTERVAL 7200000UL /* milliseconds */
+#define MEASURE_INTERVAL 60000UL /* milliseconds */
+#define ACK_TIMEOUT 1000UL /* milliseconds */
 #define RESEND_TIMES 4
 
 #define ENABLE_LED
 #define ENABLE_COM_OUTPUT
 #define ENABLE_OLED_OUTPUT
 #define ENABLE_SD_CARD
+#define ENABLE_CLOCK
 
 #define PIN_THERMOMETER 3
 #define OLED_WIDTH 128
@@ -29,15 +32,9 @@ static char const LOG_FILE_PATH[] PROGMEM = "/log.txt";
 
 #define PIN_LORA_RST 23  /* TTGO LoRa32 V2.1-1.6 version ? */
 #define OLED_I2C_ADDR 0x3C
-#define LORA_BAND 868E6
+#define LORA_BAND 868000000
 
 #include "config.h"
-
-#include <SPI.h>
-#include <LoRa.h>
-#include <RNG.h>
-#include <AES.h>
-#include <GCM.h>
 
 #define DEVICE_SENDER 0
 #define DEVICE_RECEIVER 1
@@ -56,10 +53,22 @@ static char const LOG_FILE_PATH[] PROGMEM = "/log.txt";
 #define PACKET_SEND   2
 #define CIPHER_IV_LENGTH 12
 #define CIPHER_TAG_SIZE 4
+#define DATETIME_SIZE 20
+
+#include <stdlib.h>
+#include <RNG.h>
+#include <AES.h>
+#include <GCM.h>
+//	#include <Wire.h>
+#include <SPI.h>
+#include <LoRa.h>
 
 #ifdef ENABLE_OLED_OUTPUT
-	//	#include <Wire.h>
 	#include <Adafruit_SSD1306.h>
+#endif
+
+#ifdef ENABLE_CLOCK
+	#include <PCF85063TP.h>
 #endif
 
 typedef unsigned long int Time;
@@ -72,6 +81,107 @@ struct PayloadSend {
 	float temperature;
 };
 
+#if 0
+class DateTime {
+protected:
+	unsigned short int year;
+	unsigned char month;
+	unsigned char day;
+	unsigned char hour;
+	unsigned char minute;
+	unsigned char second;
+	unsigned short int millisecond;
+public:
+	inline DateTime(
+		unsigned short int initial_year,
+		unsigned char initial_month,
+		unsigned char initial_day,
+		unsigned char initial_hour,
+		unsigned char initial_minute,
+		unsigned char initial_second = 0,
+		unsigned short int initial_millisecond = 0
+	) :
+		year(initial_year),
+		month(initial_month),
+		day(initial_day),
+		hour(initial_hour),
+		minute(initial_minute),
+		second(initial_second),
+		millisecond(initial_millisecond)
+	{}
+	inline DateTime(void) : DateTime(0, 0, 0, 0, 0, 0, 0) {}
+	DateTime(char const *const s) : millisecond(0) {
+		unsigned int ye, mo, da, ho, mi, se, ms;
+		if (sscanf(s, "%4u-%2u-%2uT%2u:%2u:%2uZ", &ye, &mo, &da, &ho, &mi, &se) != 6) {
+			DateTime();
+			return;
+		}
+		year = ye;
+		month = mo;
+		day = da;
+		hour = ho;
+		minute = mi;
+		second = se;
+	}
+	bool leap_year(void) const {
+		return !(year%400) || year%100 != 0 && !(year&3);
+	}
+	unsigned int days_of_month(void) const {
+		switch (month) {
+		case 1: return 31;
+		case 2: return leap_year() ? 29 : 28;
+		case 3: return 31;
+		case 4: return 30;
+		case 5: return 31;
+		case 6: return 30;
+		case 7: return 31;
+		case 8: return 31;
+		case 9: return 30;
+		case 10: return 31;
+		case 11: return 30;
+		case 12: return 31;
+		default: return 0;
+		}
+	}
+	DateTime &operator+=(unsigned long int const ms) {
+		div_t d;
+		d = div(millisecond+ms, 1000);
+		millisecond += d.rem;
+		d = div(second+d.quot, 60);
+		second += d.rem;
+		d = div(minute+d.quot, 60);
+		minute += d.rem;
+		d = div(hour+d.quot, 24);
+		hour += d.rem;
+		day += d.quot;
+		for (;;) {
+			unsigned char const days = days_of_month();
+			if (day <= days) break;
+			day -= days;
+			++month;
+		}
+		d = div(month-1, 12);
+		month = d.rem+1;
+		year += d.quot;
+		return *this;
+	}
+	size_t string(char *const buffer, size_t const size) const {
+		return snprintf(
+			buffer, size,
+			"%04u-%02u-%02uT%02u:%02u:%02u.%03uZ",
+			year, month, day,
+			hour, minute, second,
+			millisecond
+		);
+	}
+	String string(void) const {
+		char buffer[24];
+		(void)string(buffer, sizeof buffer);
+		return String(buffer);
+	}
+};
+#endif
+
 class Schedule {
 protected:
 	bool enable;
@@ -79,9 +189,7 @@ protected:
 	Time period;
 	Time margin;
 public:
-	Schedule(Time const initial_period)
-	: enable(false), head(0), period(initial_period), margin(0)
-	{}
+	Schedule(Time const initial_period) : enable(false), head(0), period(initial_period), margin(0) {}
 	void start(Time const now, Time const addition_period = 0) {
 		enable = true;
 		head = now;
@@ -94,38 +202,30 @@ public:
 		head = now;
 	}
 	void tick(Time const now) {
-		if (enable && (now < head || head+period+margin <= now)) run(now);
+		if (enable && (now-head >= period+margin))
+			run(now);
 	}
 };
 
+#ifdef ENABLE_CLOCK
+	static class PCD85063TP RTC;
+#endif
+
+static char const secret_key[16] PROGMEM = SECRET_KEY;
+static char const log_file_path[] PROGMEM = LOG_FILE_PATH;
+
 #ifdef ENABLE_COM_OUTPUT
-	#define DEFINE_FUNCTION(TYPE) \
-		inline static void Serial_print(TYPE x) { \
-			Serial.print(x); \
-		} \
-		inline static void Serial_println(TYPE x) { \
-			Serial.println(x); \
-		}
-	DEFINE_FUNCTION(char const)
-	DEFINE_FUNCTION(uint8_t const)
-	DEFINE_FUNCTION(signed int const)
-	DEFINE_FUNCTION(uint32_t const)
-	DEFINE_FUNCTION(double const)
-	DEFINE_FUNCTION(char const *const)
-	DEFINE_FUNCTION(String const &)
-	#undef DEFINE_FUNCTION
+	template <typename TYPE>
+	inline void Serial_print(TYPE const x) {
+			Serial.print(x);
+	}
+	template <typename TYPE>
+	inline void Serial_println(TYPE x) {
+		Serial.println(x);
+	}
 #else
-	#define DEFINE_FUNCTION(TYPE) \
-		inline static void Serial_print(TYPE x) {} \
-		inline static void Serial_println(TYPE x) {}
-	DEFINE_FUNCTION(char const)
-	DEFINE_FUNCTION(uint8_t const)
-	DEFINE_FUNCTION(signed int const)
-	DEFINE_FUNCTION(uint32_t const)
-	DEFINE_FUNCTION(double const)
-	DEFINE_FUNCTION(char const *const)
-	DEFINE_FUNCTION(String const &)
-	#undef DEFINE_FUNCTION
+	template <typename TYPE> inline void Serial_print(TYPE x) {}
+	template <typename TYPE> inline void Serial_println(TYPE x) {}
 #endif
 
 #ifdef ENABLE_OLED_OUTPUT
@@ -144,53 +244,35 @@ public:
 		OLED.clearDisplay();
 		OLED.setCursor(0,0);
 	}
-	#define DEFINE_FUNCTION(TYPE) \
-		inline static void OLED_print(TYPE x) { \
-			OLED.print(x); \
-		} \
-		inline static void OLED_println(TYPE x) { \
-			OLED.println(x); \
-		}
-	DEFINE_FUNCTION(uint8_t const)
-	DEFINE_FUNCTION(signed int const)
-	DEFINE_FUNCTION(uint32_t const)
-	DEFINE_FUNCTION(double const)
-	DEFINE_FUNCTION(char const *const)
-	DEFINE_FUNCTION(String const &)
-	#undef DEFINE_FUNCTION
+	template <typename TYPE>
+	inline void OLED_print(TYPE x) {
+		OLED.print(x);
+	}
+	template <typename TYPE>
+	inline void OLED_println(TYPE x) {
+		OLED.println(x);
+	}
 	inline static void OLED_display(void) {
 		OLED.display();
 	}
 #else
 	inline static void OLED_initialize(void) {}
 	inline static void OLED_home(void) {}
-	#define DEFINE_FUNCTION(TYPE) \
-		inline static void OLED_print(TYPE x) {} \
-		inline static void OLED_println(TYPE x) {}
-	DEFINE_FUNCTION(uint8_t const)
-	DEFINE_FUNCTION(signed int const)
-	DEFINE_FUNCTION(uint32_t const)
-	DEFINE_FUNCTION(double const)
-	DEFINE_FUNCTION(char const *const)
-	DEFINE_FUNCTION(String const &)
-	#undef DEFINE_FUNCTION
+	template <typename TYPE> inline void OLED_print(TYPE x) {}
+	template <typename TYPE> inline void OLED_println(TYPE x) {}
 	inline static void OLED_display(void) {}
 #endif
 
-#define DEFINE_FUNCTION(TYPE) \
-	inline static void any_print(TYPE x) { \
-		Serial_print(x); \
-		OLED_print(x); \
-	} \
-	inline static void any_println(TYPE x) { \
-		Serial_println(x); \
-		OLED_println(x); \
-	}
-DEFINE_FUNCTION(char const *)
-DEFINE_FUNCTION(uint8_t)
-DEFINE_FUNCTION(uint32_t)
-DEFINE_FUNCTION(double const)
-#undef DEFINE_FUNCTION
+template <typename TYPE>
+inline void any_print(TYPE x) {
+	Serial_print(x);
+	OLED_print(x);
+}
+template <typename TYPE>
+inline void any_println(TYPE x) {
+	Serial_println(x);
+	OLED_println(x);
+}
 
 bool LoRa_initialize(void) {
 	SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
@@ -236,7 +318,7 @@ static bool setup_error;
 	static SerialNumber serial_current;
 	static float temperature;
 	#ifdef ENABLE_OLED_OUTPUT
-		static char const *OLED_message;
+		static String OLED_message;
 	#endif
 	static SerialNumber serial_wait;
 
@@ -244,7 +326,7 @@ static bool setup_error;
 		static void dump_log_file(void) {
 			class File file;
 			Serial_println("Log file BEGIN");
-			file = SD.open(LOG_FILE_PATH, FILE_READ);
+			file = SD.open(log_file_path, FILE_READ);
 			for (;;) {
 				signed int const c = file.read();
 				if (c < 0) break;
@@ -253,21 +335,22 @@ static bool setup_error;
 			Serial_println("");
 			file.close();
 
-			file = SD.open(LOG_FILE_PATH, FILE_WRITE);
+			file = SD.open(log_file_path, FILE_WRITE);
 			file.close();
 			Serial_println("Log file END");
 		}
 
 		static void append_log_file(float const temperature) {
-			class File file = SD.open(LOG_FILE_PATH, FILE_APPEND);
+			class File file = SD.open(log_file_path, FILE_APPEND);
 			if (!file) {
 				any_println("Failed to append file log.txt");
 			} else {
-				if (!file.println(temperature)) {
-					any_println("Failed to write file log.txt");
-				} else {
-					file.close();
-				}
+				file.printf(
+					"%04u-%02u-%02uT%02u:%02u:%02uZ,%f\n",
+					RTC.year, RTC.month, RTC.dayOfMonth,
+					RTC.hour, RTC.minute, RTC.second
+				);
+				file.close();
 			}
 		}
 	#else
@@ -285,7 +368,7 @@ static bool setup_error;
 		cleantext.serial = serial;
 		cleantext.temperature = temperature;
 		AuthCipher cipher;
-		if (!cipher.setKey((uint8_t const *)SECRET_KEY, sizeof SECRET_KEY)) {
+		if (!cipher.setKey((uint8_t const *)secret_key, sizeof secret_key)) {
 			Serial_println("Unable to set key");
 			#ifdef ENABLE_OLED_OUTPUT
 				OLED_message = "Unable to set key";
@@ -337,66 +420,86 @@ static bool setup_error;
 		resend_schedule.start(millis());
 	}
 
-	static class Measure : public Schedule {
-	public:
-		Measure(void) : Schedule(MEASURE_PERIOD) {}
-		virtual void run(Time const now) {
-			Schedule::run(now);
-			OLED_home();
-			thermometer.requestTemperatures();
-			temperature = thermometer.getTempCByIndex(0);
-			any_print("Serial: ");
-			any_println(serial_current);
-			any_print("Temperature: ");
-			any_println(temperature);
-			#ifdef ENABLE_OLED_OUTPUT
-				OLED_println(OLED_message);
-			#endif
-			send_LoRa();
-			append_log_file(temperature);
-			OLED_display();
+	static bool LoRa_receive_payload(char const *const message, void *const buffer, size_t const size) {
+		uint8_t nonce[CIPHER_IV_LENGTH];
+		if (LoRa.readBytes(nonce, sizeof nonce) != sizeof nonce) {
+			Serial_print("LoRa ");
+			Serial_print(message);
+			Serial_println(": fail to read cipher nonce");
+			return false;
 		}
-	} measure_schedule;
+		char ciphertext[size];
+		if (LoRa.readBytes(ciphertext, sizeof ciphertext) != size) {
+			Serial_print("LoRa ");
+			Serial_print(message);
+			Serial_println(": fail to read time");
+			return false;
+		}
+		uint8_t tag[CIPHER_TAG_SIZE];
+		if (LoRa.readBytes(tag, sizeof tag) != sizeof tag) {
+			Serial_print("LoRa ");
+			Serial_print(message);
+			Serial_println(": fail to read cipher tag");
+			return false;
+		}
+		AuthCipher cipher;
+		if (!cipher.setKey((uint8_t const *)secret_key, sizeof secret_key)) {
+			Serial_print("LoRa ");
+			Serial_print(message);
+			Serial_println(": fail to set cipher key");
+			#ifdef ENABLE_OLED_OUTPUT
+				OLED_message = String("LoRa ") + message + ": fail to set cipher key";
+			#endif
+			return false;
+		}
+		if (!cipher.setIV(nonce, sizeof nonce)) {
+			Serial_print("LoRa ");
+			Serial_print(message);
+			Serial_println(": fail to set cipher nonce");
+			#ifdef ENABLE_OLED_OUTPUT
+				OLED_message = String("LoRa ") + message + ": fail to set cipher nonce";
+			#endif
+			return false;
+		}
+		cipher.decrypt((uint8_t *)&buffer, (uint8_t const *)&ciphertext, size);
+		if (!cipher.checkTag(tag, sizeof tag)) {
+			Serial_print("LoRa ");
+			Serial_print(message);
+			Serial_println(": invalid cipher tag");
+			return false;
+		}
+		return true;
+	}
+
+	static void LoRa_receive_TIME(void) {
+		char datetime[DATETIME_SIZE+1];
+		if (!LoRa_receive_payload("TIME", datetime, DATETIME_SIZE)) return;
+		datetime[DATETIME_SIZE] = 0;
+		unsigned int year, month, day, hour, minute, second;
+		if (
+			sscanf(
+				datetime,
+				"%4u-%2u-%2uT%2u:%2u:%2uZ",
+				&year, &month, &day,
+				&hour, &minute, &second
+			) != 6
+		) {
+			Serial_println("LoRa Time: fail to parse time");
+			return;
+		}
+		RTC.stopClock();
+		RTC.fillByYMD(year, month, day);
+		RTC.fillByHMS(hour, minute, second);
+		RTC.setTime();
+		RTC.startClock();
+	}
 
 	static void LoRa_receive_ACK(void) {
 		Device const device = LoRa.read();
 		if (device != DEVICE_ID) return;
-		uint8_t nonce[CIPHER_IV_LENGTH];
-		if (LoRa.readBytes(nonce, sizeof nonce) != sizeof nonce) {
-			Serial_println("LoRa ACK: fail to read cipher nonce");
-			return;
-		}
-		SerialNumber ciphertext;
-		if (LoRa.readBytes((char *)&ciphertext, sizeof ciphertext) != sizeof ciphertext) {
-			Serial_println("LoRa ACK: fail to read serial number");
-			return;
-		}
-		AuthCipher cipher;
-		if (!cipher.setKey((uint8_t const *)SECRET_KEY, sizeof SECRET_KEY)) {
-			Serial_println("LoRa ACK: fail to set cipher key");
-			#ifdef ENABLE_OLED_OUTPUT
-				OLED_message = "LoRa ACK: fail to set cipher key";
-			#endif
-		}
-		if (!cipher.setIV(nonce, sizeof nonce)) {
-			Serial_println("LoRa ACK: fail to set cipher nonce");
-			#ifdef ENABLE_OLED_OUTPUT
-				OLED_message = "LoRa ACK: fail to set cipher nonce";
-			#endif
-			return;
-		}
-		SerialNumber cleantext;
-		cipher.decrypt((uint8_t *)&cleantext, (uint8_t const *)&ciphertext, sizeof cleantext);
-		uint8_t tag[CIPHER_TAG_SIZE];
-		if (LoRa.readBytes(tag, sizeof tag) != sizeof tag) {
-			Serial_println("LoRa ACK: fail to read cipher tag");
-			return;
-		}
-		if (!cipher.checkTag(tag, sizeof tag)) {
-			Serial_println("LoRa ACK: invalid cipher tag");
-			return;
-		}
-		if (cleantext != serial_wait) {
+		SerialNumber serial;
+		if (!LoRa_receive_payload("ACK", &serial, sizeof serial)) return;
+		if (serial != serial_wait) {
 			Serial_println("LoRa ACK: serial number unmatched");
 			return;
 		}
@@ -407,6 +510,14 @@ static bool setup_error;
 		if (!packet_size) return;
 		uint8_t const packet_type = LoRa.read();
 		switch (packet_type) {
+		case PACKET_TIME:
+			if (packet_size != 1 + CIPHER_IV_LENGTH + DATETIME_SIZE + CIPHER_TAG_SIZE) {
+				Serial_print("LoRa TIME: incorrect packet size: ");
+				Serial_println(packet_size);
+				break;
+			}
+			LoRa_receive_TIME();
+			break;
 		case PACKET_ACK:
 			if (packet_size != 1 + 1 + CIPHER_IV_LENGTH + sizeof (SerialNumber) + CIPHER_TAG_SIZE) {
 				Serial_print("LoRa ACK: incorrect packet size: ");
@@ -425,6 +536,27 @@ static bool setup_error;
 		RNG.stir((uint8_t const *)&microseconds, sizeof microseconds, 8);
 	}
 
+	static class Measure : public Schedule {
+	public:
+		Measure(void) : Schedule(MEASURE_INTERVAL) {}
+		virtual void run(Time const now) {
+			Schedule::run(now);
+			OLED_home();
+			thermometer.requestTemperatures();
+			temperature = thermometer.getTempCByIndex(0);
+			any_print("Serial: ");
+			any_println(serial_current);
+			any_print("Temperature: ");
+			any_println(temperature);
+			#ifdef ENABLE_OLED_OUTPUT
+				OLED_println(OLED_message);
+			#endif
+			append_log_file(temperature);
+			send_LoRa();
+			OLED_display();
+		}
+	} measure_schedule;
+
 	void setup() {
 		/* initialize internal states */
 		setup_error = false;
@@ -441,6 +573,8 @@ static bool setup_error;
 		/* initialize serial port */
 		#ifdef ENABLE_COM_OUTPUT
 			Serial.begin(COM_BAUD);
+		#else
+			Serial.end();
 		#endif
 
 		/* initialize OLED */
@@ -459,9 +593,8 @@ static bool setup_error;
 		}
 
 		/* Initialize LoRa */
-		if (!setup_error) {
-			setup_error = LoRa_initialize();
-		}
+		if (!setup_error)
+			setup_error = !LoRa_initialize();
 
 		/* initialize SD card */
 		#ifdef ENABLE_SD_CARD
@@ -479,6 +612,13 @@ static bool setup_error;
 			}
 		#endif
 
+		/* initialize real-time clock */
+		#ifdef ENABLE_CLOCK
+			RTC.begin();
+			RTC.startClock();
+		#endif
+
+		/* display setup result on OLED */
 		OLED_display();
 	}
 
@@ -496,7 +636,9 @@ static bool setup_error;
 	}
 #elif DEVICE_TYPE == DEVICE_RECEIVER
 	#include <WiFi.h>
+	#include <WiFiUdp.h>
 	#include <HTTPClient.h>
+	#include <NTPClient.h>
 
 	static SerialNumber serial_last[NUMBER_OF_SENDERS];
 	static signed int HTTP_status;
@@ -505,6 +647,8 @@ static bool setup_error;
 		static SerialNumber OLED_serial;
 		static float OLED_temperature;
 	#endif
+	static WiFiUDP UDP;
+	static NTPClient NTP(UDP, NTP_SERVER);
 
 	static void upload_WiFi(Device const device, SerialNumber const serial, float const value) {
 		signed int const WiFi_status = WiFi.status();
@@ -513,8 +657,8 @@ static bool setup_error;
 			return;
 		}
 		HTTPClient HTTP_client;
-		char URL[HTTP_URL_LENGTH];
-		snprintf(URL, sizeof URL, HTTP_URL_FORMAT, device, serial, value);
+		char URL[HTTP_UPLOAD_LENGTH];
+		snprintf(URL, sizeof URL, HTTP_UPLOAD_FORMAT, device, serial, value);
 		Serial_print("Upload to ");
 		Serial_println(URL);
 		HTTP_client.begin(URL);
@@ -573,7 +717,7 @@ static bool setup_error;
 		LoRa.write(nonce, sizeof nonce);
 		SerialNumber const cleantext = serial;
 		AuthCipher cipher;
-		if (!cipher.setKey((uint8_t const *)SECRET_KEY, sizeof SECRET_KEY)) {
+		if (!cipher.setKey((uint8_t const *)secret_key, sizeof secret_key)) {
 			Serial_println("LoRa SEND ACK: unable to set cipher key");
 			return;
 		}
@@ -603,7 +747,7 @@ static bool setup_error;
 			return;
 		}
 		AuthCipher cipher;
-		if (!cipher.setKey((uint8_t const *)SECRET_KEY, sizeof SECRET_KEY)) {
+		if (!cipher.setKey((uint8_t const *)secret_key, sizeof secret_key)) {
 			Serial_println("LoRa SEND: fail to set cipher key");
 			return;
 		}
@@ -661,12 +805,71 @@ static bool setup_error;
 		RNG.stir((uint8_t const *)&microseconds, sizeof microseconds, 8);
 	}
 
+	class Synchronize : public Schedule {
+	public:
+		Synchronize(void) : Schedule(SYNCHONIZE_INTERVAL) {}
+		virtual void run(Time const now) {
+			Schedule::run(now);
+
+			#ifdef ENABLE_CLOCK
+				unsigned int const year = 2000+RTC.year;
+				unsigned int const month = RTC.month;
+				unsigned int const day = RTC.dayOfMonth;
+				unsigned int const hour = RTC.hour;
+				unsigned int const minute = RTC.minute;
+				unsigned int const second = RTC.second;
+			#else
+				if (!NTP.isTimeSet()) return;
+				time_t const epoch = NTP.getEpochTime();
+				struct tm time;
+				gmtime_r(&epoch, &time);
+				unsigned int const year = 1900+time.tm_year;
+				unsigned int const month = time.tm_mon;
+				unsigned int const day = time.tm_mday;
+				unsigned int const hour = time.tm_hour;
+				unsigned int const minute = time.tm_min;
+				unsigned int const second = time.tm_sec;
+			#endif
+
+			LoRa.beginPacket();
+			LoRa.write(uint8_t(PACKET_TIME));
+			uint8_t nonce[CIPHER_IV_LENGTH];
+			RNG.rand(nonce, sizeof nonce);
+			LoRa.write(nonce, sizeof nonce);
+			char cleantext[DATETIME_SIZE+1];
+			RTC.getTime();
+			snprintf(
+				cleantext, sizeof cleantext,
+				"%04u-%02u-%02uT%02u:%02u:%02uZ",
+				year, month, day,
+				hour, minute, second
+			);
+			AuthCipher cipher;
+			if (!cipher.setKey((uint8_t const *)secret_key, sizeof secret_key)) {
+				Serial_println("LoRa SEND ACK: unable to set cipher key");
+				return;
+			}
+			if (!cipher.setIV(nonce, sizeof nonce)) {
+				Serial_println("LoRa SEND ACK: unable to set nonce");
+				return;
+			}
+			char ciphertext[DATETIME_SIZE];
+			cipher.encrypt((uint8_t *)&ciphertext, (uint8_t const *)&cleantext, DATETIME_SIZE);
+			LoRa.write((uint8_t const *)&ciphertext, DATETIME_SIZE);
+			uint8_t tag[CIPHER_TAG_SIZE];
+			cipher.computeTag(tag, sizeof tag);
+			LoRa.write((uint8_t const *)&tag, sizeof tag);
+			LoRa.endPacket(true);
+		}
+	} synchronize_schedule;
+
 	void setup() {
 		/* initialize internal states */
 		setup_error = false;
 		HTTP_status = 0;
 		for (size_t i=0; i<NUMBER_OF_SENDERS; ++i)
 			serial_last[i] = 0;
+		synchronize_schedule.start(0);
 
 		/* initialize LED */
 		LED_initialize();
@@ -681,15 +884,23 @@ static bool setup_error;
 
 		/* Initialize LoRa */
 		if (!setup_error) {
-			setup_error = LoRa_initialize();
+			setup_error = !LoRa_initialize();
 		}
 
 		/* initialize WiFi */
 		if (!setup_error) {
 			WiFi.begin(WIFI_SSID, WIFI_PASS);
-			OLED_println(WiFi_status_message(WiFi.status()));
+			//	any_println(WiFi_status_message(WiFi.status()));
 		}
 
+		/* initialize real-time clock */
+		if (!setup_error) {
+			RTC.begin();
+			RTC.startClock();
+			NTP.begin();
+		}
+
+		/* display setup result on OLED */
 		OLED_display();
 	}
 
@@ -699,6 +910,21 @@ static bool setup_error;
 			return;
 		}
 		LoRa_receive(LoRa.parsePacket());
+		if (WiFi.status() == WL_CONNECTED) {
+			if (NTP.update()) {
+				#ifdef ENABLE_CLOCK
+					time_t const epoch = NTP.getEpochTime();
+					struct tm time;
+					gmtime_r(&epoch, &time);
+					RTC.stopClock();
+					RTC.fillByYMD(1900+time.tm_year, time.tm_mon+1, time.tm_mday);
+					RTC.fillByHMS(time.tm_hour, time.tm_min, time.tm_sec);
+					RTC.setTime();
+					RTC.startClock();
+				#endif
+			}
+		}
+		synchronize_schedule.tick(millis());
 		RNG.loop();
 	}
 #endif
