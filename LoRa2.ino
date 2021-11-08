@@ -330,21 +330,21 @@ static struct DateTime DateTime_from_tm(struct tm const *const time) {
 }
 
 #ifdef ENABLE_CLOCK
-static struct DateTime DateTime_from_RTC(void) {
-	RTC.getTime();
-	return {
-		.year = (unsigned short int)(2000U + RTC.year),
-		.month = RTC.month,
-		.day = RTC.dayOfMonth,
-		.hour = RTC.hour,
-		.minute = RTC.minute,
-		.second = RTC.second
-	};
-}
-#else
-static struct DateTime DateTime_from_RTC(void) {
-	return {.year = 0, .month = 0, .day = 0, .hour = 0, .minute = 0, .second = 0};
-}
+	inline static bool DateTime_now_available(void) {
+		/* TODO: more checking */
+		return true;
+	}
+	static struct DateTime DateTime_now(void) {
+		RTC.getTime();
+		return {
+			.year = (unsigned short int)(2000U + RTC.year),
+			.month = RTC.month,
+			.day = RTC.dayOfMonth,
+			.hour = RTC.hour,
+			.minute = RTC.minute,
+			.second = RTC.second
+		};
+	}
 #endif
 
 static bool setup_error;
@@ -357,7 +357,7 @@ static bool setup_error;
 	#endif
 
 	#ifndef ENABLE_CLOCK
-		#error Real-time clock is required for sender device.
+		#include <ESP32Time.h>
 	#endif
 
 	static class OneWire onewire_thermometer(PIN_THERMOMETER);
@@ -385,7 +385,6 @@ static bool setup_error;
 			file.close();
 			Serial_println("Log file END");
 		}
-
 		static void append_log_file(void) {
 			class File file = SD.open(log_file_path, FILE_APPEND);
 			if (!file) {
@@ -402,6 +401,24 @@ static bool setup_error;
 		}
 	#else
 		inline static void append_log_file(void) {}
+	#endif
+
+	#ifndef ENABLE_CLOCK
+		static bool clk_available;
+		class ESP32Time clk;
+		static bool DateTime_now_available(void) {
+			return clk_available;
+		}
+		static struct DateTime DateTime_now(void) {
+			return {
+				.year = (unsigned short int)clk.getYear(),
+				.month = (unsigned char)clk.getMonth(),
+				.day = (unsigned char)clk.getDay(),
+				.hour = (unsigned char)clk.getHour(),
+				.minute = (unsigned char)clk.getMinute(),
+				.second = (unsigned char)clk.getSecond()
+			};
+		}
 	#endif
 
 	static void LoRa_send_SEND(void) {
@@ -450,6 +467,12 @@ static bool setup_error;
 			RTC.fillByHMS(payload.hour, payload.minute, payload.second);
 			RTC.setTime();
 			RTC.startClock();
+		#else
+			clk.setTime(
+				payload.second, payload.minute, payload.hour,
+				payload.day, payload.month, payload.year
+			);
+			clk_available = true;
 		#endif
 	}
 
@@ -500,9 +523,11 @@ static bool setup_error;
 		Measure(void) : Schedule(MEASURE_INTERVAL) {}
 		virtual void run(Time const now) {
 			Schedule::run(now);
+			if (!DateTime_now_available()) return;
+
 			OLED_home();
 			measured.serial = serial_current;
-			measured.time = DateTime_from_RTC();
+			measured.time = DateTime_now();
 			thermometer.requestTemperatures();
 			measured.temperature = thermometer.getTempCByIndex(0);
 			any_print("Serial: ");
@@ -581,7 +606,7 @@ static bool setup_error;
 			RTC.begin();
 			RTC.startClock();
 		#else
-			clock_available = false;
+			clk_available = false;
 		#endif
 
 		/* display setup result on OLED */
@@ -610,6 +635,25 @@ static bool setup_error;
 	static signed int HTTP_status;
 	static WiFiUDP UDP;
 	static NTPClient NTP(UDP, NTP_SERVER);
+
+	#ifndef ENABLE_CLOCK
+		inline static bool DateTime_now_available(void) {
+			return NTP.isTimeSet();
+		}
+		static struct DateTime DateTime_now(void) {
+			time_t const epoch = NTP.getEpochTime();
+			struct tm time;
+			gmtime_r(&epoch, &time);
+			return {
+				.year = (unsigned short int)(1900 + time.tm_year),
+				.month = (unsigned char)(time.tm_mon + 1),
+				.day = (unsigned char)time.tm_mday,
+				.hour = (unsigned char)time.tm_hour,
+				.minute = (unsigned char)time.tm_min,
+				.second = (unsigned char)time.tm_sec
+			};
+		}
+	#endif
 
 	static void upload_WiFi(Device const device, SerialNumber const serial, char const *const time, float const value) {
 		signed int const WiFi_status = WiFi.status();
@@ -741,23 +785,8 @@ static bool setup_error;
 		Synchronize(void) : Schedule(SYNCHONIZE_INTERVAL) {}
 		virtual void run(Time const now) {
 			Schedule::run(now);
-
-			#ifdef ENABLE_CLOCK
-				struct DateTime const payload = DateTime_from_RTC();
-			#else
-				if (!NTP.isTimeSet()) return;
-				time_t const epoch = NTP.getEpochTime();
-				struct tm time;
-				gmtime_r(&epoch, &time);
-				struct DateTime const payload = {
-					.year = (unsigned short int)(1900 + time.tm_year),
-					.month = (unsigned char)(time.tm_mon + 1),
-					.day = (unsigned char)time.tm_mday,
-					.hour = (unsigned char)time.tm_hour,
-					.minute = (unsigned char)time.tm_min,
-					.second = (unsigned char)time.tm_sec
-				};
-			#endif
+			if (!DateTime_now_available()) return;
+			struct DateTime const payload = DateTime_now();
 
 			LoRa.beginPacket();
 			LoRa.write(uint8_t(PACKET_TIME));

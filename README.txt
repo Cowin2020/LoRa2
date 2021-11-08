@@ -1,3 +1,44 @@
+Install libraries
+=================
+
+Additional Board Manager URLs:
+https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_dev_index.json
+
+Crypto
+------
+
+Edit libraries/Crypto/src/AES.h
+	remove the usage of "CRYPTO_AES_ESP32"
+	always use "CRYPTO_AES_DEFAULT"
+
+ESP32Time
+---------
+
+ESP8266 and ESP32 OLED driver for SSD1306 displays
+--------------------------------------------------
+
+NTPClient
+---------
+
+IDE version does not work.
+It should be installed from github.
+https://github.com/arduino-libraries/NTPClient.git
+
+HTTPClient
+----------
+
+LoRa
+----
+
+OneWire
+-------
+
+DallasTemperature
+-----------------
+
+Grove - High Precision RTC
+--------------------------
+
 Configuration
 =============
 
