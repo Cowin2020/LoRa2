@@ -9,7 +9,7 @@ LoRa sender and receiver
 
 #define WIFI_SSID "SSID"
 #define WIFI_PASS "PASSWORD"
-#define HTTP_UPLOAD_FORMAT "http://www.example.com/%1$u/%2$lu/%3$F"
+#define HTTP_UPLOAD_FORMAT "http://www.example.com/%1$u/%2$lu/%3$s/%4$F"
 #define HTTP_UPLOAD_LENGTH 256
 #define NTP_SERVER "stdtime.gov.hk"
 #define SECRET_KEY "This is secret!"
@@ -55,6 +55,7 @@ LoRa sender and receiver
 #define CIPHER_TAG_SIZE 4
 
 #include <stdlib.h>
+#include <time.h>
 #include <RNG.h>
 #include <AES.h>
 #include <GCM.h>
@@ -86,6 +87,7 @@ struct DateTime {
 
 struct Payload_SEND {
 	SerialNumber serial;
+	struct DateTime time;
 	float temperature;
 };
 
@@ -305,6 +307,46 @@ static bool LoRa_receive_payload(char const *const message, void *const payload,
 	return true;
 }
 
+static String String_from_DateTime(struct DateTime const *const datetime) {
+	char buffer[48];
+	snprintf(
+		buffer, sizeof buffer,
+		"%04u-%02u-%02uT%02u:%02u:%02uZ",
+		datetime->year, datetime->month, datetime->day,
+		datetime->hour, datetime->minute, datetime->second
+	);
+	return String(buffer);
+}
+
+static struct DateTime DateTime_from_tm(struct tm const *const time) {
+	return {
+		.year = (unsigned short int)(1900 + time->tm_year),
+		.month = (unsigned char)(time->tm_mon + 1),
+		.day = (unsigned char)time->tm_mday,
+		.hour = (unsigned char)time->tm_hour,
+		.minute = (unsigned char)time->tm_min,
+		.second = (unsigned char)time->tm_sec
+	};
+}
+
+#ifdef ENABLE_CLOCK
+static struct DateTime DateTime_from_RTC(void) {
+	RTC.getTime();
+	return {
+		.year = (unsigned short int)(2000U + RTC.year),
+		.month = RTC.month,
+		.day = RTC.dayOfMonth,
+		.hour = RTC.hour,
+		.minute = RTC.minute,
+		.second = RTC.second
+	};
+}
+#else
+static struct DateTime DateTime_from_RTC(void) {
+	return {.year = 0, .month = 0, .day = 0, .hour = 0, .minute = 0, .second = 0};
+}
+#endif
+
 static bool setup_error;
 
 #if DEVICE_TYPE == DEVICE_SENDER
@@ -314,13 +356,17 @@ static bool setup_error;
 		#include <SD.h>
 	#endif
 
+	#ifndef ENABLE_CLOCK
+		#error Real-time clock is required for sender device.
+	#endif
+
 	static class OneWire onewire_thermometer(PIN_THERMOMETER);
 	static class DallasTemperature thermometer(&onewire_thermometer);
 	static class SPIClass SPI_1(HSPI);
 
 	static SerialNumber serial_current;
-	static SerialNumber serial_wait;
 	static float temperature;
+	static Payload_SEND measured;
 
 	#ifdef ENABLE_SD_CARD
 		static void dump_log_file(void) {
@@ -340,29 +386,29 @@ static bool setup_error;
 			Serial_println("Log file END");
 		}
 
-		static void append_log_file(float const temperature) {
+		static void append_log_file(void) {
 			class File file = SD.open(log_file_path, FILE_APPEND);
 			if (!file) {
 				any_println("Failed to append file log.txt");
 			} else {
 				file.printf(
 					"%04u-%02u-%02uT%02u:%02u:%02uZ,%f\n",
-					RTC.year, RTC.month, RTC.dayOfMonth,
-					RTC.hour, RTC.minute, RTC.second
+					measured.time.year, measured.time.month, measured.time.dayOfMonth,
+					measured.time.hour, measured.time.minute, measured.time.second,
+					measured.temperature
 				);
 				file.close();
 			}
 		}
 	#else
-		inline static void append_log_file(float const temperature) {}
+		inline static void append_log_file(void) {}
 	#endif
 
-	static void LoRa_send_SEND(SerialNumber const serial) {
+	static void LoRa_send_SEND(void) {
 		LoRa.beginPacket();
 		LoRa.write(uint8_t(PACKET_SEND));
 		LoRa.write(uint8_t(DEVICE_ID));
-		struct Payload_SEND const payload = {.serial = serial, .temperature = temperature};
-		LoRa_send_payload("SEND", &payload, sizeof payload);
+		LoRa_send_payload("SEND", &measured, sizeof measured);
 		LoRa.endPacket(true);
 	}
 
@@ -380,14 +426,13 @@ static bool setup_error;
 		}
 		virtual void run(Time const now) {
 			Schedule::run(now);
-			LoRa_send_SEND(serial_wait);
+			LoRa_send_SEND();
 			if (!--counter) stop();
 		}
 	} resend_schedule;
 
 	static void LoRa_send(void) {
-		LoRa_send_SEND(serial_current);
-		serial_wait = serial_current;
+		LoRa_send_SEND();
 		if (serial_current & ~(~(SerialNumber)0 >> 1))
 			serial_current = 0;
 		else
@@ -399,11 +444,13 @@ static bool setup_error;
 		struct DateTime payload;
 		if (!LoRa_receive_payload("TIME", &payload, sizeof payload)) return;
 
-		RTC.stopClock();
-		RTC.fillByYMD(payload.year, payload.month, payload.day);
-		RTC.fillByHMS(payload.hour, payload.minute, payload.second);
-		RTC.setTime();
-		RTC.startClock();
+		#ifdef ENABLE_CLOCK
+			RTC.stopClock();
+			RTC.fillByYMD(payload.year, payload.month, payload.day);
+			RTC.fillByHMS(payload.hour, payload.minute, payload.second);
+			RTC.setTime();
+			RTC.startClock();
+		#endif
 	}
 
 	static void LoRa_receive_ACK(void) {
@@ -411,7 +458,7 @@ static bool setup_error;
 		if (device != DEVICE_ID) return;
 		SerialNumber serial;
 		if (!LoRa_receive_payload("ACK", &serial, sizeof serial)) return;
-		if (serial != serial_wait) {
+		if (serial != measured.serial) {
 			Serial_println("LoRa ACK: serial number unmatched");
 			return;
 		}
@@ -454,17 +501,21 @@ static bool setup_error;
 		virtual void run(Time const now) {
 			Schedule::run(now);
 			OLED_home();
+			measured.serial = serial_current;
+			measured.time = DateTime_from_RTC();
 			thermometer.requestTemperatures();
-			temperature = thermometer.getTempCByIndex(0);
+			measured.temperature = thermometer.getTempCByIndex(0);
 			any_print("Serial: ");
 			any_println(serial_current);
+			Serial_print("Time: ");
+			any_println(String_from_DateTime(&measured.time));
 			any_print("Temperature: ");
-			any_println(temperature);
+			any_println(measured.temperature);
 			#ifdef ENABLE_OLED_OUTPUT
 				OLED_println(OLED_message);
 				OLED_message = "";
 			#endif
-			append_log_file(temperature);
+			append_log_file();
 			LoRa_send();
 			OLED_display();
 		}
@@ -529,6 +580,8 @@ static bool setup_error;
 		#ifdef ENABLE_CLOCK
 			RTC.begin();
 			RTC.startClock();
+		#else
+			clock_available = false;
 		#endif
 
 		/* display setup result on OLED */
@@ -558,7 +611,7 @@ static bool setup_error;
 	static WiFiUDP UDP;
 	static NTPClient NTP(UDP, NTP_SERVER);
 
-	static void upload_WiFi(Device const device, SerialNumber const serial, float const value) {
+	static void upload_WiFi(Device const device, SerialNumber const serial, char const *const time, float const value) {
 		signed int const WiFi_status = WiFi.status();
 		if (WiFi_status != WL_CONNECTED) {
 			Serial_println("Upload no WiFi");
@@ -566,7 +619,7 @@ static bool setup_error;
 		}
 		HTTPClient HTTP_client;
 		char URL[HTTP_UPLOAD_LENGTH];
-		snprintf(URL, sizeof URL, HTTP_UPLOAD_FORMAT, device, serial, value);
+		snprintf(URL, sizeof URL, HTTP_UPLOAD_FORMAT, device, serial, time, value);
 		Serial_print("Upload to ");
 		Serial_println(URL);
 		HTTP_client.begin(URL);
@@ -632,26 +685,33 @@ static bool setup_error;
 			Serial_println("LoRa SEND: serial number out of order");
 			/* TODO: handle situation */
 		}
-
 		LoRa_send_ACK(device, payload.serial);
+
+		char time[48];
+		snprintf(
+			time, sizeof time,
+			"%04u-%02u-%02uT%02u:%02u:%02uZ",
+			payload.time.year, payload.time.month, payload.time.day,
+			payload.time.hour, payload.time.minute, payload.time.second
+		);
 		serial_last[device-1] = payload.serial;
 		#ifdef ENABLE_OLED_OUTPUT
 			OLED_home();
 			OLED_println(WiFi_status_message(WiFi.status()));
 			OLED_print("HTTP: ");
 			OLED_println(HTTP_status);
-			OLED_print("Device: ");
-			OLED_println(device);
-			OLED_print("Serial Number: ");
+			OLED_print("Device ");
+			OLED_print(device);
+			OLED_print(" Serial ");
 			OLED_println(payload.serial);
+			OLED_println(time);
 			OLED_print("Temperature: ");
 			OLED_println(payload.temperature);
 			OLED_println(OLED_message);
 			OLED_message = "";
 			OLED_display();
 		#endif
-
-		upload_WiFi(device, payload.serial, payload.temperature);
+		upload_WiFi(device, payload.serial, time, payload.temperature);
 	}
 
 	static void LoRa_receive(signed int const packet_size) {
@@ -683,23 +743,15 @@ static bool setup_error;
 			Schedule::run(now);
 
 			#ifdef ENABLE_CLOCK
-				RTC.getTime();
-				struct DateTime const payload = {
-					.year = 2000+RTC.year,
-					.month = RTC.month,
-					.day = RTC.dayOfMonth,
-					.hour = RTC.hour,
-					.minute = RTC.minute,
-					.second = RTC.second
-				};
+				struct DateTime const payload = DateTime_from_RTC();
 			#else
 				if (!NTP.isTimeSet()) return;
 				time_t const epoch = NTP.getEpochTime();
 				struct tm time;
 				gmtime_r(&epoch, &time);
 				struct DateTime const payload = {
-					.year = (unsigned short int)(1900+time.tm_year),
-					.month = (unsigned char)time.tm_mon,
+					.year = (unsigned short int)(1900 + time.tm_year),
+					.month = (unsigned char)(time.tm_mon + 1),
 					.day = (unsigned char)time.tm_mday,
 					.hour = (unsigned char)time.tm_hour,
 					.minute = (unsigned char)time.tm_min,
@@ -718,7 +770,7 @@ static bool setup_error;
 		/* initialize internal states */
 		setup_error = false;
 		HTTP_status = 0;
-		for (size_t i=0; i<NUMBER_OF_SENDERS; ++i)
+		for (size_t i = 0; i < NUMBER_OF_SENDERS; ++i)
 			serial_last[i] = 0;
 		synchronize_schedule.start(0);
 
@@ -752,6 +804,7 @@ static bool setup_error;
 				RTC.begin();
 				RTC.startClock();
 				NTP.begin();
+				NTP.setUpdateInterval(SYNCHONIZE_INTERVAL);
 			}
 		#endif
 

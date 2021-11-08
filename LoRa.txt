@@ -25,6 +25,6 @@ Protocol of time synchronization
 
 Protocol of uploading data
 --------------------------
-	1. Client: type SEND, 1 byte client ID, nonce, encrypted serial code and value, authentication tag.
+	1. Client: type SEND, 1 byte client ID, nonce, encrypted serial code and time and value, authentication tag.
 	2. Server: type ACK, 1 byte client ID, nonce, encrypted serial code, authentication tag.
 	3. If ACK is not receviced from server and number of tries is not over limit, loop back to step 1.
