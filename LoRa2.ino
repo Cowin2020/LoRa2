@@ -14,7 +14,7 @@ LoRa sender and receiver
 #define NTP_SERVER "stdtime.gov.hk"
 #define SECRET_KEY "This is secret!"
 #define LOG_FILE_PATH "/log.txt"
-#define SYNCHONIZE_INTERVAL 7200000UL /* milliseconds */
+#define SYNCHONIZE_INTERVAL 7654321UL /* milliseconds */
 #define MEASURE_INTERVAL 60000UL /* milliseconds */
 #define ACK_TIMEOUT 1000UL /* milliseconds */
 #define RESEND_TIMES 4
@@ -76,7 +76,7 @@ typedef uint8_t Device;
 typedef uint32_t SerialNumber;
 typedef class GCM<AES128> AuthCipher;
 
-struct PayloadSend {
+struct Payload_SEND {
 	SerialNumber serial;
 	float temperature;
 };
@@ -230,6 +230,7 @@ static char const log_file_path[] PROGMEM = LOG_FILE_PATH;
 
 #ifdef ENABLE_OLED_OUTPUT
 	static Adafruit_SSD1306 OLED(OLED_WIDTH, OLED_HEIGHT);
+	static String OLED_message;
 	static void OLED_initialize(void) {
 		//	Wire.begin(OLED_SDA, OLED_SCL);
 		OLED.begin(SSD1306_SWITCHCAPVCC, OLED_I2C_ADDR);
@@ -274,18 +275,6 @@ inline void any_println(TYPE x) {
 	OLED_println(x);
 }
 
-bool LoRa_initialize(void) {
-	SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
-	LoRa.setPins(LORA_CS, LORA_RST, LORA_IRQ);
-	if (LoRa.begin(LORA_BAND) == 1) {
-		any_println("LoRa initialized");
-		return true;
-	} else {
-		any_println("LoRa uninitialized");
-		return false;
-	}
-}
-
 #ifdef ENABLE_LED
 	static void LED_initialize(void) {
 		pinMode(LED_BUILTIN, OUTPUT);
@@ -302,6 +291,113 @@ bool LoRa_initialize(void) {
 	inline static void LED_flash(void) {}
 #endif
 
+bool LoRa_initialize(void) {
+	SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
+	LoRa.setPins(LORA_CS, LORA_RST, LORA_IRQ);
+	if (LoRa.begin(LORA_BAND) == 1) {
+		any_println("LoRa initialized");
+		return true;
+	} else {
+		any_println("LoRa uninitialized");
+		return false;
+	}
+}
+
+static bool LoRa_send_payload(char const *const message, void const *const payload, size_t const size) {
+	uint8_t nonce[CIPHER_IV_LENGTH];
+	RNG.rand(nonce, sizeof nonce);
+	LoRa.write(nonce, sizeof nonce);
+	AuthCipher cipher;
+	if (!cipher.setKey((uint8_t const *)secret_key, sizeof secret_key)) {
+		Serial_print("LoRa ");
+		Serial_print(message);
+		Serial_println(": unable to set key");
+		#ifdef ENABLE_OLED_OUTPUT
+			OLED_message = "Unable to set key";
+		#endif
+		return false;
+	}
+	if (!cipher.setIV(nonce, sizeof nonce)) {
+		Serial_print("LoRa ");
+		Serial_print(message);
+		Serial_println(": unable to set nonce");
+		#ifdef ENABLE_OLED_OUTPUT
+			OLED_message = "Unable to set nonce";
+		#endif
+		return false;
+	}
+	char ciphertext[size];
+	cipher.encrypt((uint8_t *)&ciphertext, (uint8_t const *)payload, size);
+	LoRa.write((uint8_t const *)&ciphertext, sizeof ciphertext);
+	uint8_t tag[CIPHER_TAG_SIZE];
+	cipher.computeTag(tag, sizeof tag);
+	LoRa.write((uint8_t const *)&tag, sizeof tag);
+	return true;
+}
+
+static bool LoRa_receive_payload(char const *const message, void *const payload, size_t const size) {
+	uint8_t nonce[CIPHER_IV_LENGTH];
+	if (LoRa.readBytes(nonce, sizeof nonce) != sizeof nonce) {
+		Serial_print("LoRa ");
+		Serial_print(message);
+		Serial_println(": fail to read cipher nonce");
+		#ifdef ENABLE_OLED_OUTPUT
+			OLED_message = String("LoRa ") + message + ": fail to read cipher nonce";
+		#endif
+		return false;
+	}
+	char ciphertext[size];
+	if (LoRa.readBytes(ciphertext, sizeof ciphertext) != size) {
+		Serial_print("LoRa ");
+		Serial_print(message);
+		Serial_println(": fail to read time");
+		#ifdef ENABLE_OLED_OUTPUT
+			OLED_message = String("LoRa ") + message + ": fail to read time";
+		#endif
+		return false;
+	}
+	uint8_t tag[CIPHER_TAG_SIZE];
+	if (LoRa.readBytes(tag, sizeof tag) != sizeof tag) {
+		Serial_print("LoRa ");
+		Serial_print(message);
+		Serial_println(": fail to read cipher tag");
+		#ifdef ENABLE_OLED_OUTPUT
+			OLED_message = String("LoRa ") + message + ": fail to read cipher tag";
+		#endif
+		return false;
+	}
+	AuthCipher cipher;
+	if (!cipher.setKey((uint8_t const *)secret_key, sizeof secret_key)) {
+		Serial_print("LoRa ");
+		Serial_print(message);
+		Serial_println(": fail to set cipher key");
+		#ifdef ENABLE_OLED_OUTPUT
+			OLED_message = String("LoRa ") + message + ": fail to set cipher key";
+		#endif
+		return false;
+	}
+	if (!cipher.setIV(nonce, sizeof nonce)) {
+		Serial_print("LoRa ");
+		Serial_print(message);
+		Serial_println(": fail to set cipher nonce");
+		#ifdef ENABLE_OLED_OUTPUT
+			OLED_message = String("LoRa ") + message + ": fail to set cipher nonce";
+		#endif
+		return false;
+	}
+	cipher.decrypt((uint8_t *)payload, (uint8_t const *)&ciphertext, size);
+	if (!cipher.checkTag(tag, sizeof tag)) {
+		Serial_print("LoRa ");
+		Serial_print(message);
+		Serial_println(": invalid cipher tag");
+		#ifdef ENABLE_OLED_OUTPUT
+			OLED_message = String("LoRa ") + message + ": invalid cipher tag";
+		#endif
+		return false;
+	}
+	return true;
+}
+
 static bool setup_error;
 
 #if DEVICE_TYPE == DEVICE_SENDER
@@ -316,11 +412,8 @@ static bool setup_error;
 	static class SPIClass SPI_1(HSPI);
 
 	static SerialNumber serial_current;
-	static float temperature;
-	#ifdef ENABLE_OLED_OUTPUT
-		static String OLED_message;
-	#endif
 	static SerialNumber serial_wait;
+	static float temperature;
 
 	#ifdef ENABLE_SD_CARD
 		static void dump_log_file(void) {
@@ -357,37 +450,12 @@ static bool setup_error;
 		inline static void append_log_file(float const temperature) {}
 	#endif
 
-	static void send_LoRa_serial(SerialNumber const serial) {
+	static void LoRa_send_SEND(SerialNumber const serial) {
 		LoRa.beginPacket();
 		LoRa.write(uint8_t(PACKET_SEND));
 		LoRa.write(uint8_t(DEVICE_ID));
-		uint8_t nonce[CIPHER_IV_LENGTH];
-		RNG.rand(nonce, sizeof nonce);
-		LoRa.write(nonce, sizeof nonce);
-		struct PayloadSend cleantext;
-		cleantext.serial = serial;
-		cleantext.temperature = temperature;
-		AuthCipher cipher;
-		if (!cipher.setKey((uint8_t const *)secret_key, sizeof secret_key)) {
-			Serial_println("Unable to set key");
-			#ifdef ENABLE_OLED_OUTPUT
-				OLED_message = "Unable to set key";
-			#endif
-			return;
-		}
-		if (!cipher.setIV(nonce, sizeof nonce)) {
-			Serial_println("Unable to set nonce");
-			#ifdef ENABLE_OLED_OUTPUT
-				OLED_message = "Unable to set nonce";
-			#endif
-			return;
-		}
-		struct PayloadSend ciphertext;
-		cipher.encrypt((uint8_t *)&ciphertext, (uint8_t const *)&cleantext, sizeof cleantext);
-		LoRa.write((uint8_t const *)&ciphertext, sizeof ciphertext);
-		uint8_t tag[CIPHER_TAG_SIZE];
-		cipher.computeTag(tag, sizeof tag);
-		LoRa.write((uint8_t const *)&tag, sizeof tag);
+		struct Payload_SEND const payload = {.serial = serial, .temperature = temperature};
+		LoRa_send_payload("SEND", &payload, sizeof payload);
 		LoRa.endPacket(true);
 	}
 
@@ -405,70 +473,19 @@ static bool setup_error;
 		}
 		virtual void run(Time const now) {
 			Schedule::run(now);
-			send_LoRa_serial(serial_wait);
+			LoRa_send_SEND(serial_wait);
 			if (!--counter) stop();
 		}
 	} resend_schedule;
 
-	static void send_LoRa(void) {
-		send_LoRa_serial(serial_current);
+	static void LoRa_send(void) {
+		LoRa_send_SEND(serial_current);
 		serial_wait = serial_current;
 		if (serial_current & ~(~(SerialNumber)0 >> 1))
 			serial_current = 0;
 		else
 			++serial_current;
 		resend_schedule.start(millis());
-	}
-
-	static bool LoRa_receive_payload(char const *const message, void *const buffer, size_t const size) {
-		uint8_t nonce[CIPHER_IV_LENGTH];
-		if (LoRa.readBytes(nonce, sizeof nonce) != sizeof nonce) {
-			Serial_print("LoRa ");
-			Serial_print(message);
-			Serial_println(": fail to read cipher nonce");
-			return false;
-		}
-		char ciphertext[size];
-		if (LoRa.readBytes(ciphertext, sizeof ciphertext) != size) {
-			Serial_print("LoRa ");
-			Serial_print(message);
-			Serial_println(": fail to read time");
-			return false;
-		}
-		uint8_t tag[CIPHER_TAG_SIZE];
-		if (LoRa.readBytes(tag, sizeof tag) != sizeof tag) {
-			Serial_print("LoRa ");
-			Serial_print(message);
-			Serial_println(": fail to read cipher tag");
-			return false;
-		}
-		AuthCipher cipher;
-		if (!cipher.setKey((uint8_t const *)secret_key, sizeof secret_key)) {
-			Serial_print("LoRa ");
-			Serial_print(message);
-			Serial_println(": fail to set cipher key");
-			#ifdef ENABLE_OLED_OUTPUT
-				OLED_message = String("LoRa ") + message + ": fail to set cipher key";
-			#endif
-			return false;
-		}
-		if (!cipher.setIV(nonce, sizeof nonce)) {
-			Serial_print("LoRa ");
-			Serial_print(message);
-			Serial_println(": fail to set cipher nonce");
-			#ifdef ENABLE_OLED_OUTPUT
-				OLED_message = String("LoRa ") + message + ": fail to set cipher nonce";
-			#endif
-			return false;
-		}
-		cipher.decrypt((uint8_t *)&buffer, (uint8_t const *)&ciphertext, size);
-		if (!cipher.checkTag(tag, sizeof tag)) {
-			Serial_print("LoRa ");
-			Serial_print(message);
-			Serial_println(": invalid cipher tag");
-			return false;
-		}
-		return true;
 	}
 
 	static void LoRa_receive_TIME(void) {
@@ -484,7 +501,8 @@ static bool setup_error;
 				&hour, &minute, &second
 			) != 6
 		) {
-			Serial_println("LoRa Time: fail to parse time");
+			Serial_print("LoRa Time: fail to parse time: ");
+			Serial_println(datetime);
 			return;
 		}
 		RTC.stopClock();
@@ -552,7 +570,7 @@ static bool setup_error;
 				OLED_println(OLED_message);
 			#endif
 			append_log_file(temperature);
-			send_LoRa();
+			LoRa_send();
 			OLED_display();
 		}
 	} measure_schedule;
@@ -702,6 +720,7 @@ static bool setup_error;
 			OLED_println(OLED_serial);
 			OLED_print("Temperature: ");
 			OLED_println(OLED_temperature);
+			OLED_println(OLED_message);
 			OLED_display();
 		}
 	#else
@@ -736,51 +755,23 @@ static bool setup_error;
 
 	static void LoRa_receive_SEND(void) {
 		Device const device = LoRa.read();
-		uint8_t nonce[CIPHER_IV_LENGTH];
-		if (LoRa.readBytes(nonce, sizeof nonce) != sizeof nonce) {
-			Serial_println("LoRa SEND: fail to read cipher nonce");
-			return;
-		}
-		char ciphertext[sizeof (PayloadSend)];
-		if (LoRa.readBytes((char *)&ciphertext, sizeof ciphertext) != sizeof ciphertext) {
-			Serial_println("LoRa SEND: fail to read serial number");
-			return;
-		}
-		AuthCipher cipher;
-		if (!cipher.setKey((uint8_t const *)secret_key, sizeof secret_key)) {
-			Serial_println("LoRa SEND: fail to set cipher key");
-			return;
-		}
-		if (!cipher.setIV(nonce, sizeof nonce)) {
-			Serial_println("LoRa SEND: fail to set cipher nonce");
-			return;
-		}
-		struct PayloadSend cleantext;
-		cipher.decrypt((uint8_t *)&cleantext, (uint8_t const *)&ciphertext, sizeof cleantext);
-		uint8_t tag[CIPHER_TAG_SIZE];
-		if (LoRa.readBytes(tag, sizeof tag) != sizeof tag) {
-			Serial_println("LoRa SEND: fail to read cipher tag");
-			return;
-		}
-		if (!cipher.checkTag(tag, sizeof tag)) {
-			Serial_println("LoRa SEND: invalid cipher tag");
-			return;
-		}
-		if (cleantext.serial < serial_last[device-1] && !(serial_last[device-1] & ~(~(SerialNumber)0 >> 1))) {
+		struct Payload_SEND payload;
+		if (!LoRa_receive_payload("SEND", &payload, sizeof payload)) return;
+		if (payload.serial < serial_last[device-1] && !(serial_last[device-1] & ~(~(SerialNumber)0 >> 1))) {
 			Serial_println("LoRa SEND: serial number out of order");
 			/* TODO: handle situation */
 		}
 
-		LoRa_send_ACK(device, cleantext.serial);
-		serial_last[device-1] = cleantext.serial;
+		LoRa_send_ACK(device, payload.serial);
+		serial_last[device-1] = payload.serial;
 		#ifdef ENABLE_OLED_OUTPUT
 			OLED_device = device;
-			OLED_serial = cleantext.serial;
-			OLED_temperature = cleantext.temperature;
+			OLED_serial = payload.serial;
+			OLED_temperature = payload.temperature;
 		#endif
 
 		OLED_paint();
-		upload_WiFi(device, cleantext.serial, cleantext.temperature);
+		upload_WiFi(device, payload.serial, payload.temperature);
 	}
 
 	static void LoRa_receive(signed int const packet_size) {
@@ -788,7 +779,7 @@ static bool setup_error;
 		uint8_t const packet_type = LoRa.read();
 		switch (packet_type) {
 		case PACKET_SEND:
-			if (packet_size != 1 + 1 + CIPHER_IV_LENGTH + sizeof (struct PayloadSend) + CIPHER_TAG_SIZE) {
+			if (packet_size != 1 + 1 + CIPHER_IV_LENGTH + sizeof (struct Payload_SEND) + CIPHER_TAG_SIZE) {
 				Serial_print("LoRa SEND: incorrect packet size: ");
 				Serial_println(packet_size);
 				break;
@@ -833,32 +824,15 @@ static bool setup_error;
 
 			LoRa.beginPacket();
 			LoRa.write(uint8_t(PACKET_TIME));
-			uint8_t nonce[CIPHER_IV_LENGTH];
-			RNG.rand(nonce, sizeof nonce);
-			LoRa.write(nonce, sizeof nonce);
-			char cleantext[DATETIME_SIZE+1];
+			char payload[DATETIME_SIZE+1];
 			RTC.getTime();
 			snprintf(
-				cleantext, sizeof cleantext,
+				payload, sizeof payload,
 				"%04u-%02u-%02uT%02u:%02u:%02uZ",
 				year, month, day,
 				hour, minute, second
 			);
-			AuthCipher cipher;
-			if (!cipher.setKey((uint8_t const *)secret_key, sizeof secret_key)) {
-				Serial_println("LoRa SEND ACK: unable to set cipher key");
-				return;
-			}
-			if (!cipher.setIV(nonce, sizeof nonce)) {
-				Serial_println("LoRa SEND ACK: unable to set nonce");
-				return;
-			}
-			char ciphertext[DATETIME_SIZE];
-			cipher.encrypt((uint8_t *)&ciphertext, (uint8_t const *)&cleantext, DATETIME_SIZE);
-			LoRa.write((uint8_t const *)&ciphertext, DATETIME_SIZE);
-			uint8_t tag[CIPHER_TAG_SIZE];
-			cipher.computeTag(tag, sizeof tag);
-			LoRa.write((uint8_t const *)&tag, sizeof tag);
+			LoRa_send_payload("TIME", payload, DATETIME_SIZE);
 			LoRa.endPacket(true);
 		}
 	} synchronize_schedule;
@@ -877,6 +851,8 @@ static bool setup_error;
 		/* initialize serial port */
 		#ifdef ENABLE_COM_OUTPUT
 			Serial.begin(COM_BAUD);
+		#else
+			Serial.end();
 		#endif
 
 		/* initialize OLED */
