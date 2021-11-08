@@ -11,8 +11,13 @@ Data type and constants
 	Serial code (4 bytes, natural number)
 		Monotonic increasing
 		Allow roll-back only if MSB is 1.
-	Time (20 bytes, ASCII string)
-		ISO8601 format with "Z" timezone
+	Time (7 bytes, binary format)
+		2 bytes year
+		1 byte month
+		1 byte day
+		1 byte hour
+		1 byte minute
+		1 byte second
 
 Protocol of time synchronization
 --------------------------------

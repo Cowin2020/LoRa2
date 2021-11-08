@@ -53,7 +53,6 @@ LoRa sender and receiver
 #define PACKET_SEND   2
 #define CIPHER_IV_LENGTH 12
 #define CIPHER_TAG_SIZE 4
-#define DATETIME_SIZE 20
 
 #include <stdlib.h>
 #include <RNG.h>
@@ -76,111 +75,19 @@ typedef uint8_t Device;
 typedef uint32_t SerialNumber;
 typedef class GCM<AES128> AuthCipher;
 
-struct Payload_SEND {
-	SerialNumber serial;
-	float temperature;
-};
-
-#if 0
-class DateTime {
-protected:
+struct DateTime {
 	unsigned short int year;
 	unsigned char month;
 	unsigned char day;
 	unsigned char hour;
 	unsigned char minute;
 	unsigned char second;
-	unsigned short int millisecond;
-public:
-	inline DateTime(
-		unsigned short int initial_year,
-		unsigned char initial_month,
-		unsigned char initial_day,
-		unsigned char initial_hour,
-		unsigned char initial_minute,
-		unsigned char initial_second = 0,
-		unsigned short int initial_millisecond = 0
-	) :
-		year(initial_year),
-		month(initial_month),
-		day(initial_day),
-		hour(initial_hour),
-		minute(initial_minute),
-		second(initial_second),
-		millisecond(initial_millisecond)
-	{}
-	inline DateTime(void) : DateTime(0, 0, 0, 0, 0, 0, 0) {}
-	DateTime(char const *const s) : millisecond(0) {
-		unsigned int ye, mo, da, ho, mi, se, ms;
-		if (sscanf(s, "%4u-%2u-%2uT%2u:%2u:%2uZ", &ye, &mo, &da, &ho, &mi, &se) != 6) {
-			DateTime();
-			return;
-		}
-		year = ye;
-		month = mo;
-		day = da;
-		hour = ho;
-		minute = mi;
-		second = se;
-	}
-	bool leap_year(void) const {
-		return !(year%400) || year%100 != 0 && !(year&3);
-	}
-	unsigned int days_of_month(void) const {
-		switch (month) {
-		case 1: return 31;
-		case 2: return leap_year() ? 29 : 28;
-		case 3: return 31;
-		case 4: return 30;
-		case 5: return 31;
-		case 6: return 30;
-		case 7: return 31;
-		case 8: return 31;
-		case 9: return 30;
-		case 10: return 31;
-		case 11: return 30;
-		case 12: return 31;
-		default: return 0;
-		}
-	}
-	DateTime &operator+=(unsigned long int const ms) {
-		div_t d;
-		d = div(millisecond+ms, 1000);
-		millisecond += d.rem;
-		d = div(second+d.quot, 60);
-		second += d.rem;
-		d = div(minute+d.quot, 60);
-		minute += d.rem;
-		d = div(hour+d.quot, 24);
-		hour += d.rem;
-		day += d.quot;
-		for (;;) {
-			unsigned char const days = days_of_month();
-			if (day <= days) break;
-			day -= days;
-			++month;
-		}
-		d = div(month-1, 12);
-		month = d.rem+1;
-		year += d.quot;
-		return *this;
-	}
-	size_t string(char *const buffer, size_t const size) const {
-		return snprintf(
-			buffer, size,
-			"%04u-%02u-%02uT%02u:%02u:%02u.%03uZ",
-			year, month, day,
-			hour, minute, second,
-			millisecond
-		);
-	}
-	String string(void) const {
-		char buffer[24];
-		(void)string(buffer, sizeof buffer);
-		return String(buffer);
-	}
 };
-#endif
+
+struct Payload_SEND {
+	SerialNumber serial;
+	float temperature;
+};
 
 class Schedule {
 protected:
@@ -489,25 +396,12 @@ static bool setup_error;
 	}
 
 	static void LoRa_receive_TIME(void) {
-		char datetime[DATETIME_SIZE+1];
-		if (!LoRa_receive_payload("TIME", datetime, DATETIME_SIZE)) return;
-		datetime[DATETIME_SIZE] = 0;
-		unsigned int year, month, day, hour, minute, second;
-		if (
-			sscanf(
-				datetime,
-				"%4u-%2u-%2uT%2u:%2u:%2uZ",
-				&year, &month, &day,
-				&hour, &minute, &second
-			) != 6
-		) {
-			Serial_print("LoRa Time: fail to parse time: ");
-			Serial_println(datetime);
-			return;
-		}
+		struct DateTime payload;
+		if (!LoRa_receive_payload("TIME", &payload, sizeof payload)) return;
+
 		RTC.stopClock();
-		RTC.fillByYMD(year, month, day);
-		RTC.fillByHMS(hour, minute, second);
+		RTC.fillByYMD(payload.year, payload.month, payload.day);
+		RTC.fillByHMS(payload.hour, payload.minute, payload.second);
 		RTC.setTime();
 		RTC.startClock();
 	}
@@ -529,7 +423,7 @@ static bool setup_error;
 		uint8_t const packet_type = LoRa.read();
 		switch (packet_type) {
 		case PACKET_TIME:
-			if (packet_size != 1 + CIPHER_IV_LENGTH + DATETIME_SIZE + CIPHER_TAG_SIZE) {
+			if (packet_size != 1 + CIPHER_IV_LENGTH + sizeof (struct DateTime) + CIPHER_TAG_SIZE) {
 				Serial_print("LoRa TIME: incorrect packet size: ");
 				Serial_println(packet_size);
 				break;
@@ -568,6 +462,7 @@ static bool setup_error;
 			any_println(temperature);
 			#ifdef ENABLE_OLED_OUTPUT
 				OLED_println(OLED_message);
+				OLED_message = "";
 			#endif
 			append_log_file(temperature);
 			LoRa_send();
@@ -660,11 +555,6 @@ static bool setup_error;
 
 	static SerialNumber serial_last[NUMBER_OF_SENDERS];
 	static signed int HTTP_status;
-	#ifdef ENABLE_OLED_OUTPUT
-		static uint8_t OLED_device;
-		static SerialNumber OLED_serial;
-		static float OLED_temperature;
-	#endif
 	static WiFiUDP UDP;
 	static NTPClient NTP(UDP, NTP_SERVER);
 
@@ -708,25 +598,6 @@ static bool setup_error;
 		}
 	}
 
-	#ifdef ENABLE_OLED_OUTPUT
-		static void OLED_paint(void) {
-			OLED_home();
-			OLED_println(WiFi_status_message(WiFi.status()));
-			OLED_print("HTTP: ");
-			OLED_println(HTTP_status);
-			OLED_print("Device: ");
-			OLED_println(OLED_device);
-			OLED_print("Serial Number: ");
-			OLED_println(OLED_serial);
-			OLED_print("Temperature: ");
-			OLED_println(OLED_temperature);
-			OLED_println(OLED_message);
-			OLED_display();
-		}
-	#else
-		#define OLED_paint() {}
-	#endif
-
 	static void LoRa_send_ACK(Device const device, SerialNumber const serial) {
 		LoRa.beginPacket();
 		LoRa.write(uint8_t(PACKET_ACK));
@@ -765,12 +636,21 @@ static bool setup_error;
 		LoRa_send_ACK(device, payload.serial);
 		serial_last[device-1] = payload.serial;
 		#ifdef ENABLE_OLED_OUTPUT
-			OLED_device = device;
-			OLED_serial = payload.serial;
-			OLED_temperature = payload.temperature;
+			OLED_home();
+			OLED_println(WiFi_status_message(WiFi.status()));
+			OLED_print("HTTP: ");
+			OLED_println(HTTP_status);
+			OLED_print("Device: ");
+			OLED_println(device);
+			OLED_print("Serial Number: ");
+			OLED_println(payload.serial);
+			OLED_print("Temperature: ");
+			OLED_println(payload.temperature);
+			OLED_println(OLED_message);
+			OLED_message = "";
+			OLED_display();
 		#endif
 
-		OLED_paint();
 		upload_WiFi(device, payload.serial, payload.temperature);
 	}
 
@@ -803,36 +683,33 @@ static bool setup_error;
 			Schedule::run(now);
 
 			#ifdef ENABLE_CLOCK
-				unsigned int const year = 2000+RTC.year;
-				unsigned int const month = RTC.month;
-				unsigned int const day = RTC.dayOfMonth;
-				unsigned int const hour = RTC.hour;
-				unsigned int const minute = RTC.minute;
-				unsigned int const second = RTC.second;
+				RTC.getTime();
+				struct DateTime const payload = {
+					.year = 2000+RTC.year,
+					.month = RTC.month,
+					.day = RTC.dayOfMonth,
+					.hour = RTC.hour,
+					.minute = RTC.minute,
+					.second = RTC.second
+				};
 			#else
 				if (!NTP.isTimeSet()) return;
 				time_t const epoch = NTP.getEpochTime();
 				struct tm time;
 				gmtime_r(&epoch, &time);
-				unsigned int const year = 1900+time.tm_year;
-				unsigned int const month = time.tm_mon;
-				unsigned int const day = time.tm_mday;
-				unsigned int const hour = time.tm_hour;
-				unsigned int const minute = time.tm_min;
-				unsigned int const second = time.tm_sec;
+				struct DateTime const payload = {
+					.year = (unsigned short int)(1900+time.tm_year),
+					.month = (unsigned char)time.tm_mon,
+					.day = (unsigned char)time.tm_mday,
+					.hour = (unsigned char)time.tm_hour,
+					.minute = (unsigned char)time.tm_min,
+					.second = (unsigned char)time.tm_sec
+				};
 			#endif
 
 			LoRa.beginPacket();
 			LoRa.write(uint8_t(PACKET_TIME));
-			char payload[DATETIME_SIZE+1];
-			RTC.getTime();
-			snprintf(
-				payload, sizeof payload,
-				"%04u-%02u-%02uT%02u:%02u:%02uZ",
-				year, month, day,
-				hour, minute, second
-			);
-			LoRa_send_payload("TIME", payload, DATETIME_SIZE);
+			LoRa_send_payload("TIME", &payload, sizeof payload);
 			LoRa.endPacket(true);
 		}
 	} synchronize_schedule;
@@ -870,11 +747,13 @@ static bool setup_error;
 		}
 
 		/* initialize real-time clock */
-		if (!setup_error) {
-			RTC.begin();
-			RTC.startClock();
-			NTP.begin();
-		}
+		#ifdef ENABLE_CLOCK
+			if (!setup_error) {
+				RTC.begin();
+				RTC.startClock();
+				NTP.begin();
+			}
+		#endif
 
 		/* display setup result on OLED */
 		OLED_display();
