@@ -64,6 +64,41 @@ Number of terminal devices
 
 Values: 1-255
 
+ENABLE_LED
+----------
+
+Flash LED on error
+
+Type: defined or undefined
+
+ENABLE_COM_OUTPUT
+-----------------
+
+Output debug message to USB serial port
+
+Type: defined or undefined
+
+ENABLE_OLED_OUTPUT
+------------------
+
+Output message to OLED display
+
+Type: defined or undefined
+
+ENABLE_SD_CARD
+--------------
+
+SD card is installed and used to store measurement data
+
+Type: defined or undefined
+
+ENABLE_CLOCK
+------------
+
+Grove high precision RTC is used
+
+Type: defined or undefined
+
 WIFI_SSID and WIFI_PASS
 -----------------------
 
@@ -119,27 +154,6 @@ RESEND_TIMES
 Times to resend data if ACK is not received
 
 Type: natural number
-
-ENABLE_LED
-----------
-
-Flash LED on error
-
-Type: defined or undefined
-
-ENABLE_COM_OUTPUT
------------------
-
-Output debug message to USB serial port
-
-Type: defined or undefined
-
-ENABLE_OLED_OUTPUT
-------------------
-
-Output message to OLED display
-
-Type: defined or undefined
 
 PIN_THERMOMETER
 ---------------
