@@ -318,21 +318,19 @@ static String String_from_DateTime(struct DateTime const *const datetime) {
 	return String(buffer);
 }
 
-static struct DateTime DateTime_from_tm(struct tm const *const time) {
-	return {
-		.year = (unsigned short int)(1900 + time->tm_year),
-		.month = (unsigned char)(time->tm_mon + 1),
-		.day = (unsigned char)time->tm_mday,
-		.hour = (unsigned char)time->tm_hour,
-		.minute = (unsigned char)time->tm_min,
-		.second = (unsigned char)time->tm_sec
-	};
-}
-
 #ifdef ENABLE_CLOCK
-	inline static bool DateTime_now_available(void) {
-		/* TODO: more checking */
-		return true;
+	static bool DateTime_now_available(void) {
+		static bool available = false;
+		if (available) return true;
+		RTC.getTime();
+		available =
+			1 <= RTC.year       && RTC.year       <= 99 &&
+			1 <= RTC.month      && RTC.month      <= 12 &&
+			1 <= RTC.dayOfMonth && RTC.dayOfMonth <= 30 &&
+			0 <= RTC.hour       && RTC.hour       <= 23 &&
+			0 <= RTC.minute     && RTC.minute     <= 59 &&
+			0 <= RTC.second     && RTC.second     <= 59;
+		return available;
 	}
 	static struct DateTime DateTime_now(void) {
 		RTC.getTime();
