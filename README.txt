@@ -127,19 +127,19 @@ Need to be same for both gateway and terminal sides.
 
 Type: anything with 16 bytes size
 
-LOG_FILE_PATH
+DATA_FILE_PATH
 -------------
 
 File name in SD card to store data in terminal device
 
 Type: C string
 
-MEASURE_PERIOD
---------------
+CLEANUP_FILE_PATH
+-------------
 
-Period in milliseconds to measure data
+Temporary file name in SD card for clean up data file
 
-Type: natural number
+Type: C string
 
 ACK_TIMEOUT
 -----------
@@ -152,6 +152,22 @@ RESEND_TIMES
 ------------
 
 Times to resend data if ACK is not received
+
+Type: natural number
+
+UPLOAD_INTERVAL
+---------------
+
+Maximum period in milliseconds to upload data if SD card is used
+This value should be larger than (ACK_TIMEOUT * (RESEND_TIMES + 1)).
+
+Type: natural number
+Default: (ACK_TIMEOUT * (RESEND_TIMES + 2))
+
+MEASURE_INTERVAL
+--------------
+
+Period in milliseconds to measure data
 
 Type: natural number
 
