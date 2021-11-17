@@ -737,6 +737,9 @@ static bool setup_error;
 		if (!packet_size) return;
 		uint8_t const packet_type = LoRa.read();
 		switch (packet_type) {
+		case PACKET_SEND:
+			/* SEND sent by other senders */
+			break;
 		case PACKET_TIME:
 			if (packet_size != 1 + CIPHER_IV_LENGTH + sizeof (DateTime) + CIPHER_TAG_SIZE) {
 				Serial_print("LoRa TIME: incorrect packet size: ");
