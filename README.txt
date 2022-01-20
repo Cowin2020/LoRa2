@@ -85,6 +85,13 @@ Output message to OLED display
 
 Type: defined or undefined
 
+ENABLE_CLOCK
+------------
+
+Grove high precision RTC is used
+
+Type: defined or undefined
+
 ENABLE_SD_CARD
 --------------
 
@@ -92,10 +99,24 @@ SD card is installed and used to store measurement data
 
 Type: defined or undefined
 
-ENABLE_CLOCK
-------------
+ENABLE_DALLAS
+-------------
 
-Grove high precision RTC is used
+Dallas thermometer is used
+
+Type: defined or undefined
+
+ENABLE_BME
+----------
+
+BME280 (temperature, pressure, humidity) sensor is used
+
+Type: defined or undefined
+
+ENABLE_LTR
+----------
+
+LTR390 I2C sensor is used
 
 Type: defined or undefined
 
@@ -106,14 +127,14 @@ WiFi access point and password
 
 Type: C strings
 
-HTTP_URL_FORMAT
+HTTP_UPLOAD_FORMAT
 ---------------
 
 Printf format string of URL to upload data
 
 Type: C string
 
-HTTP_URL_LENGTH
+HTTP_UPLOAD_LENGTH
 ---------------
 
 Maximum length of HTTP URL string
