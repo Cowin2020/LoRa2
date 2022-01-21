@@ -11,6 +11,12 @@ Data type and constants
 	Serial code (4 bytes, natural number)
 		Monotonic increasing
 		Allow roll-back only if MSB is 1.
+	Values (0-20 bytes, binary format)
+		4 bytes float temperature from Dallas thermometer if ENABLE_DALLAS
+		4 bytes float temperature from BME280 if ENABLE_BME
+		4 bytes float pressure from BME280 if ENABLE_BME
+		4 bytes float humidity from BME280 if ENABLE_BME
+		4 bytes float ultraviolet LTR390 sensor if ENABLE_LTR
 	Time (7 bytes, binary format)
 		2 bytes year
 		1 byte month
@@ -25,6 +31,6 @@ Protocol of time synchronization
 
 Protocol of uploading data
 --------------------------
-	1. Client: type SEND, 1 byte client ID, nonce, encrypted serial code and time and value, authentication tag.
-	2. Server: type ACK, 1 byte client ID, nonce, encrypted serial code, authentication tag.
+	1. Client: type SEND, 1 byte client ID, nonce, encrypted serial code, values, time, and authentication tag.
+	2. Server: type ACK, 1 byte client ID, nonce, encrypted serial code, and authentication tag.
 	3. If ACK is not receviced from server and number of tries is not over limit, loop back to step 1.

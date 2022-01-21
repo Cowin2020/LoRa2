@@ -4,15 +4,24 @@ LoRa sender and receiver
 
 #include <Arduino.h>
 
+
+/* Network ID */
 #define DEVICE_ID 0
 #define NUMBER_OF_SENDERS 1
 
+
+/* Features */
 #define ENABLE_LED
 #define ENABLE_COM_OUTPUT
 #define ENABLE_OLED_OUTPUT
-#define ENABLE_SD_CARD
 #define ENABLE_CLOCK
+#define ENABLE_SD_CARD
+#define ENABLE_DALLAS
+#define ENABLE_BME
+#define ENABLE_LTR
 
+
+/* Software Parameters */
 #define WIFI_SSID "SSID"
 #define WIFI_PASS "PASSWORD"
 #define HTTP_UPLOAD_FORMAT "http://www.example.com/%1$u/%2$lu/%3$s/%4$F"
@@ -24,22 +33,27 @@ LoRa sender and receiver
 #define SYNCHONIZE_INTERVAL 7654321UL /* milliseconds */
 #define RESEND_TIMES 4
 #define ACK_TIMEOUT 1000UL /* milliseconds */
-#define UPLOAD_INTERVAL 60000UL /* milliseconds */
+#define UPLOAD_INTERVAL 6000UL /* milliseconds */
 #define MEASURE_INTERVAL 60000UL /* milliseconds */ /* MUST: > UPLOAD_INTERVAL */
 
-#define PIN_THERMOMETER 3
+
+/* Hardware Parameters */
+#define COM_BAUD 115200
 #define OLED_WIDTH 128
 #define OLED_HEIGHT 64
-#define COM_BAUD 115200
-
-#define PIN_LORA_RST 23  /* TTGO LoRa32 V2.1-1.6 version ? */
 #define OLED_I2C_ADDR 0x3C
+#define DALLAS_PIN 3
+#define LORA_PIN_RST 23  /* TTGO LoRa32 V2.1-1.6 version ? */
 #define LORA_BAND 868000000
 
-#include "config.h"
+
+/* ************************************************************************** */
 
 #define DEVICE_SENDER 0
 #define DEVICE_RECEIVER 1
+
+#include "config.h"
+
 #if DEVICE_ID == 0
 	#define DEVICE_TYPE DEVICE_RECEIVER
 #else
@@ -54,9 +68,9 @@ LoRa sender and receiver
 	#define UPLOAD_INTERVAL (ACK_TIMEOUT * (RESEND_TIMES + 2))
 #endif
 
-#define PACKET_TIME   0
-#define PACKET_ACK    1
-#define PACKET_SEND   2
+#define PACKET_TIME 0
+#define PACKET_ACK  1
+#define PACKET_SEND 2
 #define CIPHER_IV_LENGTH 12
 #define CIPHER_TAG_SIZE 4
 
@@ -73,61 +87,10 @@ LoRa sender and receiver
 	#include <Adafruit_SSD1306.h>
 #endif
 
-#ifdef ENABLE_CLOCK
-	#include <PCF85063TP.h>
-#endif
-
 typedef unsigned long int Time;
 typedef uint8_t Device;
 typedef uint32_t SerialNumber;
 typedef GCM<AES128> AuthCipher;
-
-struct DateTime {
-	unsigned short int year;
-	unsigned char month;
-	unsigned char day;
-	unsigned char hour;
-	unsigned char minute;
-	unsigned char second;
-};
-
-struct Payload_SEND {
-	SerialNumber serial;
-	DateTime time;
-	float temperature;
-};
-
-class Schedule {
-protected:
-	bool enable;
-	Time head;
-	Time period;
-	Time margin;
-public:
-	Schedule(Time const initial_period) : enable(false), head(0), period(initial_period), margin(0) {}
-	inline bool enabled(void) const {
-		return enable;
-	}
-	void start(Time const now, Time const addition_period = 0) {
-		enable = true;
-		head = now;
-		margin = addition_period;
-	}
-	void stop(void) {
-		enable = false;
-	}
-	virtual void run(Time const now) {
-		head = now;
-	}
-	void tick(Time const now) {
-		if (enable && (now-head >= period+margin))
-			run(now);
-	}
-};
-
-#ifdef ENABLE_CLOCK
-	static PCD85063TP RTC;
-#endif
 
 static char const secret_key[16] PROGMEM = SECRET_KEY;
 static char const data_file_path[] PROGMEM = DATA_FILE_PATH;
@@ -136,7 +99,7 @@ static char const cleanup_file_path[] PROGMEM = CLEANUP_FILE_PATH;
 #ifdef ENABLE_COM_OUTPUT
 	template <typename TYPE>
 	inline void Serial_print(TYPE const x) {
-			Serial.print(x);
+		Serial.print(x);
 	}
 
 	template <typename TYPE>
@@ -150,7 +113,7 @@ static char const cleanup_file_path[] PROGMEM = CLEANUP_FILE_PATH;
 
 #ifdef ENABLE_OLED_OUTPUT
 	static Adafruit_SSD1306 OLED(OLED_WIDTH, OLED_HEIGHT);
-	static String OLED_message;
+	static class String OLED_message;
 
 	static void OLED_initialize(void) {
 		//	Wire.begin(OLED_SDA, OLED_SCL);
@@ -218,114 +181,16 @@ inline void any_println(TYPE x) {
 	inline static void LED_flash(void) {}
 #endif
 
-bool LoRa_initialize(void) {
-	SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
-	LoRa.setPins(LORA_CS, LORA_RST, LORA_IRQ);
-	if (LoRa.begin(LORA_BAND) == 1) {
-		any_println("LoRa initialized");
-		return true;
-	} else {
-		any_println("LoRa uninitialized");
-		return false;
-	}
-}
+struct DateTime {
+	unsigned short int year;
+	unsigned char month;
+	unsigned char day;
+	unsigned char hour;
+	unsigned char minute;
+	unsigned char second;
+};
 
-static bool LoRa_send_payload(char const *const message, void const *const payload, size_t const size) {
-	uint8_t nonce[CIPHER_IV_LENGTH];
-	RNG.rand(nonce, sizeof nonce);
-	LoRa.write(nonce, sizeof nonce);
-	AuthCipher cipher;
-	if (!cipher.setKey((uint8_t const *)secret_key, sizeof secret_key)) {
-		Serial_print("LoRa ");
-		Serial_print(message);
-		Serial_println(": unable to set key");
-		#ifdef ENABLE_OLED_OUTPUT
-			OLED_message = "Unable to set key";
-		#endif
-		return false;
-	}
-	if (!cipher.setIV(nonce, sizeof nonce)) {
-		Serial_print("LoRa ");
-		Serial_print(message);
-		Serial_println(": unable to set nonce");
-		#ifdef ENABLE_OLED_OUTPUT
-			OLED_message = "Unable to set nonce";
-		#endif
-		return false;
-	}
-	char ciphertext[size];
-	cipher.encrypt((uint8_t *)&ciphertext, (uint8_t const *)payload, size);
-	LoRa.write((uint8_t const *)&ciphertext, sizeof ciphertext);
-	uint8_t tag[CIPHER_TAG_SIZE];
-	cipher.computeTag(tag, sizeof tag);
-	LoRa.write((uint8_t const *)&tag, sizeof tag);
-	return true;
-}
-
-static bool LoRa_receive_payload(char const *const message, void *const payload, size_t const size) {
-	uint8_t nonce[CIPHER_IV_LENGTH];
-	if (LoRa.readBytes(nonce, sizeof nonce) != sizeof nonce) {
-		Serial_print("LoRa ");
-		Serial_print(message);
-		Serial_println(": fail to read cipher nonce");
-		#ifdef ENABLE_OLED_OUTPUT
-			OLED_message = String("LoRa ") + message + ": fail to read cipher nonce";
-		#endif
-		return false;
-	}
-	char ciphertext[size];
-	if (LoRa.readBytes(ciphertext, sizeof ciphertext) != size) {
-		Serial_print("LoRa ");
-		Serial_print(message);
-		Serial_println(": fail to read time");
-		#ifdef ENABLE_OLED_OUTPUT
-			OLED_message = String("LoRa ") + message + ": fail to read time";
-		#endif
-		return false;
-	}
-	uint8_t tag[CIPHER_TAG_SIZE];
-	if (LoRa.readBytes(tag, sizeof tag) != sizeof tag) {
-		Serial_print("LoRa ");
-		Serial_print(message);
-		Serial_println(": fail to read cipher tag");
-		#ifdef ENABLE_OLED_OUTPUT
-			OLED_message = String("LoRa ") + message + ": fail to read cipher tag";
-		#endif
-		return false;
-	}
-	AuthCipher cipher;
-	if (!cipher.setKey((uint8_t const *)secret_key, sizeof secret_key)) {
-		Serial_print("LoRa ");
-		Serial_print(message);
-		Serial_println(": fail to set cipher key");
-		#ifdef ENABLE_OLED_OUTPUT
-			OLED_message = String("LoRa ") + message + ": fail to set cipher key";
-		#endif
-		return false;
-	}
-	if (!cipher.setIV(nonce, sizeof nonce)) {
-		Serial_print("LoRa ");
-		Serial_print(message);
-		Serial_println(": fail to set cipher nonce");
-		#ifdef ENABLE_OLED_OUTPUT
-			OLED_message = String("LoRa ") + message + ": fail to set cipher nonce";
-		#endif
-		return false;
-	}
-	cipher.decrypt((uint8_t *)payload, (uint8_t const *)&ciphertext, size);
-	if (!cipher.checkTag(tag, sizeof tag)) {
-		Serial_print("LoRa ");
-		Serial_print(message);
-		Serial_println(": invalid cipher tag");
-		#ifdef ENABLE_OLED_OUTPUT
-			OLED_message = String("LoRa ") + message + ": invalid cipher tag";
-		#endif
-		return false;
-	}
-	return true;
-}
-
-static String String_from_DateTime(DateTime const *const datetime) {
+static class String String_from_DateTime(struct DateTime const *const datetime) {
 	char buffer[48];
 	snprintf(
 		buffer, sizeof buffer,
@@ -337,85 +202,294 @@ static String String_from_DateTime(DateTime const *const datetime) {
 }
 
 #ifdef ENABLE_CLOCK
-	static bool DateTime_now_available(void) {
-		static bool available = false;
-		if (available) return true;
-		RTC.getTime();
-		available =
-			1 <= RTC.year       && RTC.year       <= 99 &&
-			1 <= RTC.month      && RTC.month      <= 12 &&
-			1 <= RTC.dayOfMonth && RTC.dayOfMonth <= 30 &&
-			0 <= RTC.hour       && RTC.hour       <= 23 &&
-			0 <= RTC.minute     && RTC.minute     <= 59 &&
-			0 <= RTC.second     && RTC.second     <= 59;
-		return available;
-	}
+	#include <PCF85063TP.h>
+	namespace RTC {
+		class PCD85063TP external_clock;
 
-	static DateTime DateTime_now(void) {
-		RTC.getTime();
-		return {
-			.year = (unsigned short int)(2000U + RTC.year),
-			.month = RTC.month,
-			.day = RTC.dayOfMonth,
-			.hour = RTC.hour,
-			.minute = RTC.minute,
-			.second = RTC.second
-		};
+		static void initialize(void) {
+			external_clock.begin();
+			external_clock.startClock();
+		}
+
+		static void set(struct DateTime const *const datetime) {
+				external_clock.stopClock();
+				external_clock.fillByYMD(datetime->year, datetime->month, datetime->day);
+				external_clock.fillByHMS(datetime->hour, datetime->minute, datetime->second);
+				external_clock.setTime();
+				external_clock.startClock();
+		}
+
+		static bool ready(void) {
+			static bool available = false;
+			if (available) return true;
+			external_clock.getTime();
+			available =
+				1 <= external_clock.year       && external_clock.year       <= 99 &&
+				1 <= external_clock.month      && external_clock.month      <= 12 &&
+				1 <= external_clock.dayOfMonth && external_clock.dayOfMonth <= 30 &&
+				0 <= external_clock.hour       && external_clock.hour       <= 23 &&
+				0 <= external_clock.minute     && external_clock.minute     <= 59 &&
+				0 <= external_clock.second     && external_clock.second     <= 59;
+			return available;
+		}
+
+		static struct DateTime now(void) {
+			external_clock.getTime();
+			return {
+				.year = (unsigned short int)(2000U + external_clock.year),
+				.month = external_clock.month,
+				.day = external_clock.dayOfMonth,
+				.hour = external_clock.hour,
+				.minute = external_clock.minute,
+				.second = external_clock.second
+			};
+		}
 	}
 #endif
 
+class Schedule {
+protected:
+	bool enable;
+	Time head;
+	Time period;
+	Time margin;
+public:
+	Schedule(Time const initial_period) : enable(false), head(0), period(initial_period), margin(0) {}
+	inline bool enabled(void) const {
+		return enable;
+	}
+	void start(Time const now, Time const addition_period = 0) {
+		enable = true;
+		head = now;
+		margin = addition_period;
+	}
+	void stop(void) {
+		enable = false;
+	}
+	virtual void run(Time const now) {
+		head = now;
+	}
+	void tick(Time const now) {
+		if (enable && (now-head >= period+margin))
+			run(now);
+	}
+};
+
+namespace LORA {
+	static bool initialize(void) {
+		SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
+		LoRa.setPins(LORA_CS, LORA_RST, LORA_IRQ);
+		if (LoRa.begin(LORA_BAND) == 1) {
+			any_println("LoRa initialized");
+			return true;
+		} else {
+			any_println("LoRa uninitialized");
+			return false;
+		}
+	}
+
+	static bool send_payload(char const *const message, void const *const payload, size_t const size) {
+		uint8_t nonce[CIPHER_IV_LENGTH];
+		RNG.rand(nonce, sizeof nonce);
+		LoRa.write(nonce, sizeof nonce);
+		AuthCipher cipher;
+		if (!cipher.setKey((uint8_t const *)secret_key, sizeof secret_key)) {
+			Serial_print("LoRa ");
+			Serial_print(message);
+			Serial_println(": unable to set key");
+			#ifdef ENABLE_OLED_OUTPUT
+				OLED_message = "Unable to set key";
+			#endif
+			return false;
+		}
+		if (!cipher.setIV(nonce, sizeof nonce)) {
+			Serial_print("LoRa ");
+			Serial_print(message);
+			Serial_println(": unable to set nonce");
+			#ifdef ENABLE_OLED_OUTPUT
+				OLED_message = "Unable to set nonce";
+			#endif
+			return false;
+		}
+		char ciphertext[size];
+		cipher.encrypt((uint8_t *)&ciphertext, (uint8_t const *)payload, size);
+		LoRa.write((uint8_t const *)&ciphertext, sizeof ciphertext);
+		uint8_t tag[CIPHER_TAG_SIZE];
+		cipher.computeTag(tag, sizeof tag);
+		LoRa.write((uint8_t const *)&tag, sizeof tag);
+		return true;
+	}
+
+	static bool receive_payload(char const *const message, void *const payload, size_t const size) {
+		uint8_t nonce[CIPHER_IV_LENGTH];
+		if (LoRa.readBytes(nonce, sizeof nonce) != sizeof nonce) {
+			Serial_print("LoRa ");
+			Serial_print(message);
+			Serial_println(": fail to read cipher nonce");
+			#ifdef ENABLE_OLED_OUTPUT
+				OLED_message = String("LoRa ") + message + ": fail to read cipher nonce";
+			#endif
+			return false;
+		}
+		char ciphertext[size];
+		if (LoRa.readBytes(ciphertext, sizeof ciphertext) != size) {
+			Serial_print("LoRa ");
+			Serial_print(message);
+			Serial_println(": fail to read time");
+			#ifdef ENABLE_OLED_OUTPUT
+				OLED_message = String("LoRa ") + message + ": fail to read time";
+			#endif
+			return false;
+		}
+		uint8_t tag[CIPHER_TAG_SIZE];
+		if (LoRa.readBytes(tag, sizeof tag) != sizeof tag) {
+			Serial_print("LoRa ");
+			Serial_print(message);
+			Serial_println(": fail to read cipher tag");
+			#ifdef ENABLE_OLED_OUTPUT
+				OLED_message = String("LoRa ") + message + ": fail to read cipher tag";
+			#endif
+			return false;
+		}
+		AuthCipher cipher;
+		if (!cipher.setKey((uint8_t const *)secret_key, sizeof secret_key)) {
+			Serial_print("LoRa ");
+			Serial_print(message);
+			Serial_println(": fail to set cipher key");
+			#ifdef ENABLE_OLED_OUTPUT
+				OLED_message = String("LoRa ") + message + ": fail to set cipher key";
+			#endif
+			return false;
+		}
+		if (!cipher.setIV(nonce, sizeof nonce)) {
+			Serial_print("LoRa ");
+			Serial_print(message);
+			Serial_println(": fail to set cipher nonce");
+			#ifdef ENABLE_OLED_OUTPUT
+				OLED_message = String("LoRa ") + message + ": fail to set cipher nonce";
+			#endif
+			return false;
+		}
+		cipher.decrypt((uint8_t *)payload, (uint8_t const *)&ciphertext, size);
+		if (!cipher.checkTag(tag, sizeof tag)) {
+			Serial_print("LoRa ");
+			Serial_print(message);
+			Serial_println(": invalid cipher tag");
+			#ifdef ENABLE_OLED_OUTPUT
+				OLED_message = String("LoRa ") + message + ": invalid cipher tag";
+			#endif
+			return false;
+		}
+		return true;
+	}
+}
+
+struct Data {
+	#ifdef ENABLE_DALLAS
+		float dallas_temperature;
+	#endif
+	#ifdef ENABLE_BME
+		float bme_temperature;
+		float bme_pressure;
+		float bme_humidity;
+	#endif
+	#ifdef ENABLE_LTR
+		float ltr_ultraviolet;
+	#endif
+	struct DateTime time;
+};
+//	__attribute__((packed));
+
+struct Payload_SEND {
+	SerialNumber serial;
+	struct Data data;
+};
+//	__attribute__((packed));
+
 static bool setup_error;
 
+/* ************************************************************************** */
+
 #if DEVICE_TYPE == DEVICE_SENDER
-	#include <OneWire.h>
-	#include <DallasTemperature.h>
 	#ifdef ENABLE_SD_CARD
 		#include <SD.h>
+
+		static class SPIClass SPI_1(HSPI);
+	#endif
+
+	#ifdef ENABLE_DALLAS
+		#include <OneWire.h>
+		#include <DallasTemperature.h>
+
+		static class OneWire onewire_thermometer(DALLAS_PIN);
+		static class DallasTemperature dallas(&onewire_thermometer);
+	#endif
+
+	#ifdef ENABLE_BME
+		#include <Adafruit_Sensor.h>
+		#include <Adafruit_BME280.h>
+
+		static class Adafruit_BME280 BME;
+	#endif
+
+	#ifdef ENABLE_LTR
+		#include <Adafruit_LTR390.h>
+
+		static class Adafruit_LTR390 LTR;
 	#endif
 
 	#ifndef ENABLE_CLOCK
 		#include <ESP32Time.h>
-	#endif
+		namespace RTC {
+			static bool clock_available;
+			static class ESP32Time esp32time;
 
-	static OneWire onewire_thermometer(PIN_THERMOMETER);
-	static DallasTemperature thermometer(&onewire_thermometer);
-	static SPIClass SPI_1(HSPI);
+			static void initialize(void) {
+				clock_available = false;
+			}
+			
+			static void set(struct DateTime const *const datetime) {
+				esp32time.setTime(
+					datetime->second, datetime->minute, datetime->hour,
+					datetime->day, datetime->month, datetime->year
+				);
+				clock_available = true;
+			}
+
+			static bool ready(void) {
+				return clock_available;
+			}
+
+			static struct DateTime now(void) {
+				return {
+					.year = (unsigned short int)esp32time.getYear(),
+					.month = (unsigned char)esp32time.getMonth(),
+					.day = (unsigned char)esp32time.getDay(),
+					.hour = (unsigned char)esp32time.getHour(),
+					.minute = (unsigned char)esp32time.getMinute(),
+					.second = (unsigned char)esp32time.getSecond()
+				};
+			}
+		}
+	#endif
 
 	static SerialNumber serial_current;
-	static Payload_SEND sending;
 	static off_t wait_position;
 
-	#ifndef ENABLE_CLOCK
-		static bool clock_available;
-		ESP32Time clock;
-
-		static bool DateTime_now_available(void) {
-			return clock_available;
+	namespace LORA {
+		static void send_SEND(struct Payload_SEND const *const sending) {
+			LoRa.beginPacket();
+			LoRa.write(uint8_t(PACKET_SEND));
+			LoRa.write(uint8_t(DEVICE_ID));
+			LORA::send_payload("SEND", sending, sizeof *sending);
+			LoRa.endPacket(true);
 		}
-
-		static DateTime DateTime_now(void) {
-			return {
-				.year = (unsigned short int)clock.getYear(),
-				.month = (unsigned char)clock.getMonth(),
-				.day = (unsigned char)clock.getDay(),
-				.hour = (unsigned char)clock.getHour(),
-				.minute = (unsigned char)clock.getMinute(),
-				.second = (unsigned char)clock.getSecond()
-			};
-		}
-	#endif
-
-	static void LoRa_send_SEND(void) {
-		LoRa.beginPacket();
-		LoRa.write(uint8_t(PACKET_SEND));
-		LoRa.write(uint8_t(DEVICE_ID));
-		LoRa_send_payload("SEND", &sending, sizeof sending);
-		LoRa.endPacket(true);
 	}
 
 	static class Resend : public Schedule {
 	protected:
 		unsigned int counter;
+		struct Payload_SEND sending;
 	public:
 		inline Resend(void) : Schedule(ACK_TIMEOUT) {}
 		void start(Time const now) {
@@ -427,36 +501,130 @@ static bool setup_error;
 		}
 		virtual void run(Time const now) {
 			Schedule::run(now);
-			LoRa_send_SEND();
+			LORA::send_SEND(&sending);
 			if (!--counter) stop();
+		}
+		void start_send(struct Data const *const data) {
+			sending.serial = serial_current;
+			++serial_current;
+			sending.data = *data;
+			LORA::send_SEND(&sending);
+			start(millis());
+		}
+		bool stop_ack(SerialNumber const serial) {
+			if (serial == sending.serial) {
+				stop();
+				return true;
+			} else {
+				Serial_println("LoRa ACK: serial number unmatched");
+				return false;
+			}
 		}
 	} resend_schedule;
 
-	static void LoRa_send(void) {
-		LoRa_send_SEND();
-		resend_schedule.start(millis());
-	}
+	namespace LORA {
+		static void send(struct Data const *const data) {
+			resend_schedule.start_send(data);
+		}
 
-	static void LoRa_receive_TIME(void) {
-		DateTime payload;
-		if (!LoRa_receive_payload("TIME", &payload, sizeof payload)) return;
+		static bool send_ready(void) {
+			return !resend_schedule.enabled();
+		}
 
-		#ifdef ENABLE_CLOCK
-			RTC.stopClock();
-			RTC.fillByYMD(payload.year, payload.month, payload.day);
-			RTC.fillByHMS(payload.hour, payload.minute, payload.second);
-			RTC.setTime();
-			RTC.startClock();
-		#else
-			clock.setTime(
-				payload.second, payload.minute, payload.hour,
-				payload.day, payload.month, payload.year
-			);
-			clock_available = true;
-		#endif
+		static void receive_TIME(void) {
+			struct DateTime payload;
+			if (!LORA::receive_payload("TIME", &payload, sizeof payload))
+				return;
+
+			RTC::set(&payload);
+		}
 	}
 
 	#ifdef ENABLE_SD_CARD
+		static void write_Data /* FIX: stupid "feature" of Arduino IDE */ (File *const file, struct Data const *const data) {
+			file->printf(
+				"%04u-%02u-%02uT%02u:%02u:%02uZ",
+				data->time.year, data->time.month, data->time.day,
+				data->time.hour, data->time.minute, data->time.second
+			);
+			#ifdef ENABLE_DALLAS
+				file->printf(",%f\n", data->dallas_temperature);
+			#endif
+			#ifdef ENABLE_BME
+				file->printf(
+					",%f,%f,%f",
+					data->bme_temperature, data->bme_pressure, data->bme_humidity
+				);
+			#endif
+			#ifdef ENABLE_LTR
+				file->printf(",%f", data->ltr_ultraviolet);
+			#endif
+			file->write('\n');
+		}
+
+		static bool read_Data /* FIX: stupid "feature" of Arduino IDE */ (struct Data *data, File *file) {
+			/* Time */
+			{
+				class String const s = file->readStringUntil(
+					#if defined(ENABLE_DALLAS) || defined(ENABLE_BME) || defined(ENABLE_LTR)
+						','
+					#else
+						'\n'
+					#endif
+				);
+				if (
+					sscanf(
+						s.c_str(),
+						"%4u-%2u-%2uT%2u:%2u:%2uZ",
+						&data->time.year, &data->time.month, &data->time.day,
+						&data->time.hour, &data->time.minute, &data->time.second
+					) != 6
+				) return false;
+			}
+			/* Dallas Thermometer */
+			#ifdef ENABLE_DALLAS
+				{
+					class String const s = file->readStringUntil(
+						#if defined(ENABLE_BME) || defined(ENABLE_LTR)
+							','
+						#else
+							'\n'
+						#endif
+					);
+					if (sscanf(s.c_str(), "%f", &data->dallas_temperature) != 1) return false;
+				}
+			#endif
+			/* BME280 sensor */
+			#ifdef ENABLE_BME
+				{
+					class String const s = file->readStringUntil(',');
+					if (sscanf(s.c_str(), "%f", &data->bme_temperature) != 1) return false;
+				}
+				{
+					class String const s = file->readStringUntil(',');
+					if (sscanf(s.c_str(), "%f", &data->bme_pressure) != 1) return false;
+				}
+				{
+					class String const s = file->readStringUntil(
+						#if defined(ENABLE_LTR)
+							','
+						#else
+							'\n'
+						#endif
+					);
+					if (sscanf(s.c_str(), "%f", &data->bme_humidity) != 1) return false;
+				}
+			#endif
+			/* LTR390 sensor */
+			#ifdef ENABLE_LTR
+				{
+					class String const s = file->readStringUntil('\n');
+					if (sscanf(s.c_str(), "%f", &data->ltr_ultraviolet) != 1) return false;
+				}
+			#endif
+			return true;
+		}
+
 		static void dump_log_file(void) {
 			Serial_println("Log file BEGIN");
 			File file = SD.open(data_file_path, "r");
@@ -485,50 +653,33 @@ static bool setup_error;
 				return;
 			}
 			for (;;) {
-				String const line = cleanup_file.readStringUntil('\n');
-				if (!line.length()) break;
-				unsigned int sent;
-				unsigned int year, month, day;
-				unsigned int hour, minute, second;
-				float temperature;
-				if (
-					sscanf(
-						line.c_str(),
-						"%1u,%4u-%2u-%2uT%2u:%2u:%2uZ,%f",
-						&sent,
-						&year, &month, &day,
-						&hour, &minute, &second,
-						&temperature
-					) != 8
-				) {
-					Serial_print("Clean-up: invalid data: ");
-					Serial_println(line);
+				class String const s = cleanup_file.readStringUntil(',');
+				if (!s.length()) break;
+				unsigned int const sent = s == "1";
+
+				struct Data data;
+				if (!read_Data(&data, &cleanup_file)) {
+					Serial_println("Clean-up: invalid data");
 					break;
-				};
+				}
+
 				if (sent) continue;
-				data_file.printf(
-					"0,%04u-%02u-%02uT%02u:%02u:%02uZ,%f\n",
-					year, month, day,
-					hour, minute, second,
-					temperature
-				);
+				data_file.print("1,");
+				write_Data(&data_file, &data);
 			}
 			cleanup_file.close();
 			data_file.close();
 			SD.remove(cleanup_file_path);
 		}
 
-		static void append_data_file(DateTime const *const time, float const temperature) {
+		static void append_data_file(struct Data const *const data) {
 			File file = SD.open(data_file_path, "a", true);
 			if (!file) {
 				any_println("Cannot append data file");
 			} else {
-				file.printf(
-					"0,%04u-%02u-%02uT%02u:%02u:%02uZ,%f\n",
-					time->year, time->month, time->day,
-					time->hour, time->minute, time->second,
-					temperature
-				);
+				file.print("0,");
+				write_Data(&file, data);
+				file.write('\n');
 				file.close();
 			}
 		}
@@ -560,7 +711,7 @@ static bool setup_error;
 				unsigned int hour, minute, second;
 				float temperature;
 				for (;;) {
-					String const line = file.readStringUntil('\n');
+					class String const line = file.readStringUntil('\n');
 					position_1 = file.position();
 					if (!line.length()) {
 						/* end of file */
@@ -585,18 +736,20 @@ static bool setup_error;
 						return;
 					};
 					if (!sent) {
-						/* send record to LoRa */
-						sending.serial = serial_current++;
-						sending.time.year = year;
-						sending.time.month = month;
-						sending.time.day = day;
-						sending.time.hour = hour;
-						sending.time.minute = minute;
-						sending.time.second = second;
-						sending.temperature = temperature;
 						wait_position = position;
 						file.close();
-						LoRa_send();
+						struct Data const data = {
+							.time = {
+								.year = (unsigned short int)year,
+								.month = (unsigned char)month,
+								.day = (unsigned char)day,
+								.hour = (unsigned char)hour,
+								.minute = (unsigned char)minute,
+								.second = (unsigned char)second
+							}
+							/* TODO: values */
+						};
+						LORA::send(&data);
 					}
 					position = position_1;
 				}
@@ -609,27 +762,42 @@ static bool setup_error;
 		inline Measure(void) : Schedule(MEASURE_INTERVAL) {}
 		virtual void run(Time const now) {
 			Schedule::run(now);
-			if (!DateTime_now_available()) return;
+			if (!RTC::ready()) return;
 
 			OLED_home();
-			DateTime time = DateTime_now();
-			thermometer.requestTemperatures();
-			float const temperature = thermometer.getTempCByIndex(0);
+			struct Data data;
+			data.time = RTC::now();
 			Serial_print("Time: ");
-			any_println(String_from_DateTime(&time));
-			any_print("Temperature: ");
-			any_println(temperature);
+			#ifdef ENABLE_DALLAS
+				data.dallas_temperature = dallas.getTempCByIndex(0);
+				any_print("Dallas temp.: ");
+				any_println(data.dallas_temperature);
+			#endif
+			#ifdef ENABLE_BME
+				data.bme_temperature = BME.readTemperature();
+				data.bme_pressure = BME.readPressure();
+				data.bme_humidity = BME.readHumidity();
+				any_print("BME temp.: ");
+				any_println(data.bme_temperature);
+				any_print("BME pressure: ");
+				any_println(data.bme_pressure);
+				any_print("BME humidity: ");
+				any_println(data.bme_humidity);
+			#endif
+			#ifdef ENABLE_LTR
+				data.ltr_ultraviolet = LTR.readUVS();
+				any_print("LTR UV: ");
+				any_println(data.ltr_ultraviolet);
+			#endif
+
 			#ifdef ENABLE_OLED_OUTPUT
 				OLED_println(OLED_message);
 				OLED_message = "";
 			#endif
 			#ifdef ENABLE_SD_CARD
-				append_data_file(&time, temperature);
+				append_data_file(&data);
 			#else
-				sending.serial = serial_current++;
-				sending.time = time;
-				sending.temperature = thermometer;
-				LoRa_send();
+				LORA::send(&data);
 			#endif
 			OLED_display();
 		}
@@ -643,7 +811,9 @@ static bool setup_error;
 			OLED_message = "";
 		#endif
 		measure_schedule.start(0);
-		upload_schedule.start(0);
+		#ifdef ENABLE_SD_CARD
+			upload_schedule.start(0);
+		#endif
 		RNG.begin("LoRa-2");
 
 		/* initialize LED */
@@ -659,21 +829,47 @@ static bool setup_error;
 		/* initialize OLED */
 		OLED_initialize();
 
-		/* Initialize thermometer */
-		if (!setup_error) {
-			thermometer.begin();
-			DeviceAddress thermometer_address;
-			if (thermometer.getAddress(thermometer_address, 0)) {
-				any_println("Thermometer 0 found");
-			} else {
-				setup_error = true;
-				any_println("Thermometer 0 not found");
+		/* Initialize Dallas thermometer */
+		#ifdef ENABLE_DALLAS
+			if (!setup_error) {
+				dallas.begin();
+				DeviceAddress thermometer_address;
+				if (dallas.getAddress(thermometer_address, 0)) {
+					any_println("Thermometer 0 found");
+				} else {
+					setup_error = true;
+					any_println("Thermometer 0 not found");
+				}
 			}
-		}
+		#endif
+
+		/* Initialize BME280 sensor */
+		#ifdef ENABLE_BME
+			if (!setup_error) {
+				if (BME.begin()) {
+					any_println("BME280 sensor found");
+				} else {
+					setup_error = true;
+					any_println("BME280 sensor not found");
+				}
+			}
+		#endif
+
+		/* Initial LTR390 sensor */
+		#ifdef ENABLE_LTR
+			if (!setup_error) {
+				if (LTR.begin()) {
+					any_println("LTR390 sensor found");
+				} else {
+					setup_error = true;
+					any_println("LTR390 sensor not found");
+				}
+			}
+		#endif
 
 		/* Initialize LoRa */
 		if (!setup_error)
-			setup_error = !LoRa_initialize();
+			setup_error = !LORA::initialize();
 
 		/* initialize SD card */
 		#ifdef ENABLE_SD_CARD
@@ -693,12 +889,7 @@ static bool setup_error;
 		#endif
 
 		/* initialize real-time clock */
-		#ifdef ENABLE_CLOCK
-			RTC.begin();
-			RTC.startClock();
-		#else
-			clock_available = false;
-		#endif
+		RTC::initialize();
 
 		/* display setup result on OLED */
 		OLED_display();
@@ -708,12 +899,8 @@ static bool setup_error;
 		Device const device = LoRa.read();
 		if (device != DEVICE_ID) return;
 		SerialNumber serial;
-		if (!LoRa_receive_payload("ACK", &serial, sizeof serial)) return;
-		if (serial != sending.serial) {
-			Serial_println("LoRa ACK: serial number unmatched");
-			return;
-		}
-		resend_schedule.stop();
+		if (!LORA::receive_payload("ACK", &serial, sizeof serial)) return;
+		if (!resend_schedule.stop_ack(serial)) return;
 
 		#ifdef ENABLE_SD_CARD
 			File file = SD.open(data_file_path, "r+");
@@ -741,12 +928,12 @@ static bool setup_error;
 			/* SEND sent by other senders */
 			break;
 		case PACKET_TIME:
-			if (packet_size != 1 + CIPHER_IV_LENGTH + sizeof (DateTime) + CIPHER_TAG_SIZE) {
+			if (packet_size != 1 + CIPHER_IV_LENGTH + sizeof (struct DateTime) + CIPHER_TAG_SIZE) {
 				Serial_print("LoRa TIME: incorrect packet size: ");
 				Serial_println(packet_size);
 				break;
 			}
-			LoRa_receive_TIME();
+			LORA::receive_TIME();
 			break;
 		case PACKET_ACK:
 			if (packet_size != 1 + 1 + CIPHER_IV_LENGTH + sizeof (SerialNumber) + CIPHER_TAG_SIZE) {
@@ -777,11 +964,15 @@ static bool setup_error;
 		LoRa_receive(LoRa.parsePacket());
 		resend_schedule.tick(millis());
 		RNG.loop();
-		LoRa_receive(LoRa.parsePacket());
-		upload_schedule.tick(millis());
-		RNG.loop();
+		#ifdef ENABLE_SD_CARD
+			LoRa_receive(LoRa.parsePacket());
+			upload_schedule.tick(millis());
+			RNG.loop();
+		#endif
 	}
-#elif DEVICE_TYPE == DEVICE_RECEIVER
+
+#elif DEVICE_TYPE == DEVICE_RECEIVER /* ************************************* */
+
 	#include <WiFi.h>
 	#include <WiFiUdp.h>
 	#include <HTTPClient.h>
@@ -789,35 +980,40 @@ static bool setup_error;
 
 	static SerialNumber serial_last[NUMBER_OF_SENDERS];
 	static signed int HTTP_status;
-	static WiFiUDP UDP;
-	static NTPClient NTP(UDP, NTP_SERVER);
+	static class WiFiUDP UDP;
+	static class NTPClient NTP(UDP, NTP_SERVER);
 
 	#ifndef ENABLE_CLOCK
-		inline static bool DateTime_now_available(void) {
-			return NTP.isTimeSet();
-		}
-		static DateTime DateTime_now(void) {
-			time_t const epoch = NTP.getEpochTime();
-			struct tm time;
-			gmtime_r(&epoch, &time);
-			return {
-				.year = (unsigned short int)(1900 + time.tm_year),
-				.month = (unsigned char)(time.tm_mon + 1),
-				.day = (unsigned char)time.tm_mday,
-				.hour = (unsigned char)time.tm_hour,
-				.minute = (unsigned char)time.tm_min,
-				.second = (unsigned char)time.tm_sec
-			};
+		namespace RTC {
+			inline static bool ready(void) {
+				return NTP.isTimeSet();
+			}
+
+			static struct DateTime now(void) {
+				time_t const epoch = NTP.getEpochTime();
+				struct tm time;
+				gmtime_r(&epoch, &time);
+				return {
+					.year = (unsigned short int)(1900 + time.tm_year),
+					.month = (unsigned char)(time.tm_mon + 1),
+					.day = (unsigned char)time.tm_mday,
+					.hour = (unsigned char)time.tm_hour,
+					.minute = (unsigned char)time.tm_min,
+					.second = (unsigned char)time.tm_sec
+				};
+			}
 		}
 	#endif
 
-	static bool WiFi_upload(Device const device, SerialNumber const serial, char const *const time, float const value) {
+	/* TODO: change "value" for multiple sensors */
+	//	static bool WiFi_upload(Device const device, SerialNumber const serial, char const *const time, struct Data const value);
+	static bool WiFi_upload(Device const device, SerialNumber const serial, struct Data const *const data) {
 		signed int const WiFi_status = WiFi.status();
 		if (WiFi_status != WL_CONNECTED) {
 			Serial_println("Upload no WiFi");
 			return false;
 		}
-		HTTPClient HTTP_client;
+		class HTTPClient HTTP_client;
 		char URL[HTTP_UPLOAD_LENGTH];
 		snprintf(URL, sizeof URL, HTTP_UPLOAD_FORMAT, device, serial, time, value);
 		Serial_print("Upload to ");
@@ -830,7 +1026,7 @@ static bool setup_error;
 		return true;
 	}
 
-	static String WiFi_status_message(signed int const WiFi_status) {
+	static class String WiFi_status_message(signed int const WiFi_status) {
 		switch (WiFi_status) {
 		case WL_NO_SHIELD:
 			return String("WiFi no shield");
@@ -857,23 +1053,18 @@ static bool setup_error;
 		LoRa.beginPacket();
 		LoRa.write(uint8_t(PACKET_ACK));
 		LoRa.write(uint8_t(device));
-		LoRa_send_payload("ACK", &serial, sizeof serial);
+		LORA::send_payload("ACK", &serial, sizeof serial);
 		LoRa.endPacket(true);
 	}
 
 	static void LoRa_receive_SEND(void) {
 		Device const device = LoRa.read();
-		Payload_SEND payload;
-		if (!LoRa_receive_payload("SEND", &payload, sizeof payload)) return;
+		if (!(device >= 0 && device < NUMBER_OF_SENDERS)) return;
+		struct Payload_SEND payload;
+		if (!LORA::receive_payload("SEND", &payload, sizeof payload)) return;
 		if (payload.serial < serial_last[device-1] && !(serial_last[device-1] & ~(~(SerialNumber)0 >> 1)))
 			Serial_println("LoRa SEND: serial number out of order");
-		char time[48];
-		snprintf(
-			time, sizeof time,
-			"%04u-%02u-%02uT%02u:%02u:%02uZ",
-			payload.time.year, payload.time.month, payload.time.day,
-			payload.time.hour, payload.time.minute, payload.time.second
-		);
+		class String const time = String_from_DateTime(&payload.data.time);
 		serial_last[device-1] = payload.serial;
 		#ifdef ENABLE_OLED_OUTPUT
 			OLED_home();
@@ -885,13 +1076,28 @@ static bool setup_error;
 			OLED_print(" Serial ");
 			OLED_println(payload.serial);
 			OLED_println(time);
-			OLED_print("Temperature: ");
-			OLED_println(payload.temperature);
+			#ifdef ENABLE_DALLAS
+				OLED_print("Dallas temp.: ");
+				OLED_println(payload.data.dallas_temperature);
+			#endif
+			#ifdef ENABLE_BME
+				OLED_print("BME temp.: ");
+				OLED_println(payload.data.bme_temperature);
+				OLED_print("BME pressure: ");
+				OLED_println(payload.data.bme_pressure);
+				OLED_print("BME humidity: ");
+				OLED_println(payload.data.bme_humidity);
+			#endif
+			#ifdef ENABLE_LTR
+				OLED_print("LTR UV: ");
+				OLED_println(payload.data.ltr_ultraviolet);
+			#endif
 			OLED_println(OLED_message);
 			OLED_message = "";
 			OLED_display();
 		#endif
-		if (!WiFi_upload(device, payload.serial, time, payload.temperature)) return;
+		/* TODO: fix parameter types of WiFi_upload */
+		if (!WiFi_upload(device, payload.serial, time.c_str(), payload.data.dallas_temperature)) return;
 		LoRa_send_ACK(device, payload.serial);
 	}
 
@@ -900,7 +1106,7 @@ static bool setup_error;
 		uint8_t const packet_type = LoRa.read();
 		switch (packet_type) {
 		case PACKET_SEND:
-			if (packet_size != 1 + 1 + CIPHER_IV_LENGTH + sizeof (Payload_SEND) + CIPHER_TAG_SIZE) {
+			if (packet_size != 1 + 1 + CIPHER_IV_LENGTH + sizeof (struct Payload_SEND) + CIPHER_TAG_SIZE) {
 				Serial_print("LoRa SEND: incorrect packet size: ");
 				Serial_println(packet_size);
 				break;
@@ -922,12 +1128,12 @@ static bool setup_error;
 		Synchronize(void) : Schedule(SYNCHONIZE_INTERVAL) {}
 		virtual void run(Time const now) {
 			Schedule::run(now);
-			if (!DateTime_now_available()) return;
-			DateTime const payload = DateTime_now();
+			if (!RTC::ready()) return;
+			struct DateTime const payload = RTC::now();
 
 			LoRa.beginPacket();
 			LoRa.write(uint8_t(PACKET_TIME));
-			LoRa_send_payload("TIME", &payload, sizeof payload);
+			LORA::send_payload("TIME", &payload, sizeof payload);
 			LoRa.endPacket(true);
 		}
 	} synchronize_schedule;
@@ -955,7 +1161,7 @@ static bool setup_error;
 
 		/* Initialize LoRa */
 		if (!setup_error) {
-			setup_error = !LoRa_initialize();
+			setup_error = !LORA::initialize();
 		}
 
 		/* initialize WiFi */
@@ -967,8 +1173,8 @@ static bool setup_error;
 		/* initialize real-time clock */
 		#ifdef ENABLE_CLOCK
 			if (!setup_error) {
-				RTC.begin();
-				RTC.startClock();
+				external_clock.begin();
+				external_clock.startClock();
 				NTP.begin();
 				NTP.setUpdateInterval(SYNCHONIZE_INTERVAL);
 			}
@@ -990,11 +1196,11 @@ static bool setup_error;
 					time_t const epoch = NTP.getEpochTime();
 					struct tm time;
 					gmtime_r(&epoch, &time);
-					RTC.stopClock();
-					RTC.fillByYMD(1900+time.tm_year, time.tm_mon+1, time.tm_mday);
-					RTC.fillByHMS(time.tm_hour, time.tm_min, time.tm_sec);
-					RTC.setTime();
-					RTC.startClock();
+					external_clock.stopClock();
+					external_clock.fillByYMD(1900+time.tm_year, time.tm_mon+1, time.tm_mday);
+					external_clock.fillByHMS(time.tm_hour, time.tm_min, time.tm_sec);
+					external_clock.setTime();
+					external_clock.startClock();
 				#endif
 			}
 		}
@@ -1002,3 +1208,5 @@ static bool setup_error;
 		RNG.loop();
 	}
 #endif
+
+/* ************************************************************************** */
