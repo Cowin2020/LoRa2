@@ -106,6 +106,11 @@ static char const cleanup_file_path[] PROGMEM = CLEANUP_FILE_PATH;
 	inline void Serial_println(TYPE x) {
 		Serial.println(x);
 	}
+
+	template <typename TYPE>
+	inline void Serial_println(TYPE const x, int option) {
+		Serial.println(x, option);
+	}
 #else
 	template <typename TYPE> inline void Serial_print(TYPE x) {}
 	template <typename TYPE> inline void Serial_println(TYPE x) {}
@@ -141,6 +146,11 @@ static char const cleanup_file_path[] PROGMEM = CLEANUP_FILE_PATH;
 		OLED.println(x);
 	}
 
+	template <typename TYPE>
+	inline void OLED_println(TYPE const x, int option) {
+		OLED.println(x, option);
+	}
+
 	inline static void OLED_display(void) {
 		OLED.display();
 	}
@@ -162,6 +172,12 @@ template <typename TYPE>
 inline void any_println(TYPE x) {
 	Serial_println(x);
 	OLED_println(x);
+}
+
+template <typename TYPE>
+inline void any_println(TYPE x, int option) {
+	Serial_println(x, option);
+	OLED_println(x, option);
 }
 
 #ifdef ENABLE_LED
@@ -212,11 +228,11 @@ static class String String_from_DateTime(struct DateTime const *const datetime) 
 		}
 
 		static void set(struct DateTime const *const datetime) {
-				external_clock.stopClock();
-				external_clock.fillByYMD(datetime->year, datetime->month, datetime->day);
-				external_clock.fillByHMS(datetime->hour, datetime->minute, datetime->second);
-				external_clock.setTime();
-				external_clock.startClock();
+			external_clock.stopClock();
+			external_clock.fillByYMD(datetime->year, datetime->month, datetime->day);
+			external_clock.fillByHMS(datetime->hour, datetime->minute, datetime->second);
+			external_clock.setTime();
+			external_clock.startClock();
 		}
 
 		static bool ready(void) {
@@ -780,7 +796,7 @@ static bool setup_error;
 				any_print("BME temp.: ");
 				any_println(data.bme_temperature);
 				any_print("BME pressure: ");
-				any_println(data.bme_pressure);
+				any_println(data.bme_pressure, 0);
 				any_print("BME humidity: ");
 				any_println(data.bme_humidity);
 			#endif
@@ -980,8 +996,8 @@ static bool setup_error;
 
 	static SerialNumber serial_last[NUMBER_OF_SENDERS];
 	static signed int HTTP_status;
-	static class WiFiUDP UDP;
-	static class NTPClient NTP(UDP, NTP_SERVER);
+	static class WiFiUDP WiFiUDP;
+	static class NTPClient NTP(WiFiUDP, NTP_SERVER);
 
 	#ifndef ENABLE_CLOCK
 		namespace RTC {
@@ -1005,17 +1021,31 @@ static bool setup_error;
 		}
 	#endif
 
-	/* TODO: change "value" for multiple sensors */
-	//	static bool WiFi_upload(Device const device, SerialNumber const serial, char const *const time, struct Data const value);
 	static bool WiFi_upload(Device const device, SerialNumber const serial, struct Data const *const data) {
 		signed int const WiFi_status = WiFi.status();
 		if (WiFi_status != WL_CONNECTED) {
 			Serial_println("Upload no WiFi");
 			return false;
 		}
+		class String const time = String_from_DateTime(&data->time);
 		class HTTPClient HTTP_client;
 		char URL[HTTP_UPLOAD_LENGTH];
-		snprintf(URL, sizeof URL, HTTP_UPLOAD_FORMAT, device, serial, time, value);
+		snprintf(
+			URL, sizeof URL,
+			HTTP_UPLOAD_FORMAT,
+			device, serial, time.c_str()
+			#ifdef ENABLE_DALLAS
+				, data->dallas_temperature
+			#endif
+			#ifdef ENABLE_BME
+				, data->bme_temperature
+				, data->bme_pressure
+				, data->bme_humidity
+			#endif
+			#ifdef ENABLE_LTR
+				, data->ltr_ultraviolet
+			#endif
+		);
 		Serial_print("Upload to ");
 		Serial_println(URL);
 		HTTP_client.begin(URL);
@@ -1096,8 +1126,7 @@ static bool setup_error;
 			OLED_message = "";
 			OLED_display();
 		#endif
-		/* TODO: fix parameter types of WiFi_upload */
-		if (!WiFi_upload(device, payload.serial, time.c_str(), payload.data.dallas_temperature)) return;
+		if (!WiFi_upload(device, payload.serial, &payload.data)) return;
 		LoRa_send_ACK(device, payload.serial);
 	}
 
@@ -1173,8 +1202,8 @@ static bool setup_error;
 		/* initialize real-time clock */
 		#ifdef ENABLE_CLOCK
 			if (!setup_error) {
-				external_clock.begin();
-				external_clock.startClock();
+				RTC::external_clock.begin();
+				RTC::external_clock.startClock();
 				NTP.begin();
 				NTP.setUpdateInterval(SYNCHONIZE_INTERVAL);
 			}
@@ -1196,11 +1225,11 @@ static bool setup_error;
 					time_t const epoch = NTP.getEpochTime();
 					struct tm time;
 					gmtime_r(&epoch, &time);
-					external_clock.stopClock();
-					external_clock.fillByYMD(1900+time.tm_year, time.tm_mon+1, time.tm_mday);
-					external_clock.fillByHMS(time.tm_hour, time.tm_min, time.tm_sec);
-					external_clock.setTime();
-					external_clock.startClock();
+					RTC::external_clock.stopClock();
+					RTC::external_clock.fillByYMD(1900+time.tm_year, time.tm_mon+1, time.tm_mday);
+					RTC::external_clock.fillByHMS(time.tm_hour, time.tm_min, time.tm_sec);
+					RTC::external_clock.setTime();
+					RTC::external_clock.startClock();
 				#endif
 			}
 		}

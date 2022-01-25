@@ -134,6 +134,22 @@ Printf format string of URL to upload data
 
 Type: C string
 
+Position arguments:
+	%1$u
+		device ID
+	%2$lu
+		serial number of transmission
+	%3$s
+		date and time in ISO8601 format
+	%4$f, %5$f, %6$f, ...
+		measure data, orderred by
+			Dallas temperature
+			BME280 temperature
+			BME280 pressure
+			BME280 humidity
+			LTR390 ultraviolet
+		data can be missing if corresponding ENABLE_* is not defined
+
 HTTP_UPLOAD_LENGTH
 ---------------
 
@@ -192,8 +208,8 @@ Period in milliseconds to measure data
 
 Type: natural number
 
-PIN_THERMOMETER
----------------
+DALLAS_PIN
+----------
 
 Pin number of thermometer data wire
 
