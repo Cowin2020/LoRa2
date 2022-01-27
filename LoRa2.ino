@@ -21,6 +21,10 @@ LoRa sender and receiver
 #define ENABLE_LTR
 
 
+/* For Debug */
+//	#define DEBUG_CLEAN_OLD_DATA
+
+
 /* Software Parameters */
 #define WIFI_SSID "SSID"
 #define WIFI_PASS "PASSWORD"
@@ -557,31 +561,31 @@ static bool setup_error;
 	}
 
 	#ifdef ENABLE_SD_CARD
-		static void write_Data /* FIX: stupid "feature" of Arduino IDE */ (File *const file, struct Data const *const data) {
-			file->printf(
+		static void writeln_Data /* FIX: stupid "feature" of Arduino IDE */ (class Print *const print, struct Data const *const data) {
+			print->printf(
 				"%04u-%02u-%02uT%02u:%02u:%02uZ",
 				data->time.year, data->time.month, data->time.day,
 				data->time.hour, data->time.minute, data->time.second
 			);
 			#ifdef ENABLE_DALLAS
-				file->printf(",%f\n", data->dallas_temperature);
+				print->printf(",%f\n", data->dallas_temperature);
 			#endif
 			#ifdef ENABLE_BME
-				file->printf(
+				print->printf(
 					",%f,%f,%f",
 					data->bme_temperature, data->bme_pressure, data->bme_humidity
 				);
 			#endif
 			#ifdef ENABLE_LTR
-				file->printf(",%f", data->ltr_ultraviolet);
+				print->printf(",%f", data->ltr_ultraviolet);
 			#endif
-			file->write('\n');
+			print->write('\n');
 		}
 
-		static bool read_Data /* FIX: stupid "feature" of Arduino IDE */ (struct Data *data, File *file) {
+		static bool readln_Data /* FIX: stupid "feature" of Arduino IDE */ (struct Data *const data, class Stream *const stream) {
 			/* Time */
 			{
-				class String const s = file->readStringUntil(
+				class String const s = stream->readStringUntil(
 					#if defined(ENABLE_DALLAS) || defined(ENABLE_BME) || defined(ENABLE_LTR)
 						','
 					#else
@@ -591,7 +595,7 @@ static bool setup_error;
 				if (
 					sscanf(
 						s.c_str(),
-						"%4u-%2u-%2uT%2u:%2u:%2uZ",
+						"%4hu-%2hhu-%2hhuT%2hhu:%2hhu:%2hhuZ",
 						&data->time.year, &data->time.month, &data->time.day,
 						&data->time.hour, &data->time.minute, &data->time.second
 					) != 6
@@ -600,7 +604,7 @@ static bool setup_error;
 			/* Dallas Thermometer */
 			#ifdef ENABLE_DALLAS
 				{
-					class String const s = file->readStringUntil(
+					class String const s = stream->readStringUntil(
 						#if defined(ENABLE_BME) || defined(ENABLE_LTR)
 							','
 						#else
@@ -613,15 +617,15 @@ static bool setup_error;
 			/* BME280 sensor */
 			#ifdef ENABLE_BME
 				{
-					class String const s = file->readStringUntil(',');
+					class String const s = stream->readStringUntil(',');
 					if (sscanf(s.c_str(), "%f", &data->bme_temperature) != 1) return false;
 				}
 				{
-					class String const s = file->readStringUntil(',');
+					class String const s = stream->readStringUntil(',');
 					if (sscanf(s.c_str(), "%f", &data->bme_pressure) != 1) return false;
 				}
 				{
-					class String const s = file->readStringUntil(
+					class String const s = stream->readStringUntil(
 						#if defined(ENABLE_LTR)
 							','
 						#else
@@ -634,7 +638,7 @@ static bool setup_error;
 			/* LTR390 sensor */
 			#ifdef ENABLE_LTR
 				{
-					class String const s = file->readStringUntil('\n');
+					class String const s = stream->readStringUntil('\n');
 					if (sscanf(s.c_str(), "%f", &data->ltr_ultraviolet) != 1) return false;
 				}
 			#endif
@@ -649,7 +653,6 @@ static bool setup_error;
 				if (c < 0) break;
 				Serial_print(char(c));
 			}
-			Serial_println("");
 			file.close();
 			Serial_println("Log file END");
 		}
@@ -671,17 +674,22 @@ static bool setup_error;
 			for (;;) {
 				class String const s = cleanup_file.readStringUntil(',');
 				if (!s.length()) break;
-				unsigned int const sent = s == "1";
+				bool const sent = s != "0";
 
 				struct Data data;
-				if (!read_Data(&data, &cleanup_file)) {
+				if (!readln_Data(&data, &cleanup_file)) {
 					Serial_println("Clean-up: invalid data");
 					break;
 				}
 
-				if (sent) continue;
-				data_file.print("1,");
-				write_Data(&data_file, &data);
+				if (!sent) {
+					#ifdef DEBUG_CLEAN_OLD_DATA
+						data_file.print("1,");
+					#else
+						data_file.print("0,");
+					#endif
+					writeln_Data(&data_file, &data);
+				}
 			}
 			cleanup_file.close();
 			data_file.close();
@@ -694,8 +702,7 @@ static bool setup_error;
 				any_println("Cannot append data file");
 			} else {
 				file.print("0,");
-				write_Data(&file, data);
-				file.write('\n');
+				writeln_Data(&file, data);
 				file.close();
 			}
 		}
@@ -710,65 +717,35 @@ static bool setup_error;
 			}
 			virtual void run(Time const now) {
 				Schedule::run(now);
-				File file = SD.open(DATA_FILE_PATH, "r");
-				if (!file) {
+				File data_file = SD.open(DATA_FILE_PATH, "r");
+				if (!data_file) {
 					Serial_println("Upload: fail to open data file");
 					return;
 				}
-				if (!file.seek(position)) {
+				if (!data_file.seek(position)) {
 					Serial_print("Upload: cannot seek: ");
 					Serial_println(position);
-					file.close();
+					data_file.close();
 					return;
 				}
-				off_t position_1;
-				unsigned int sent;
-				unsigned int year, month, day;
-				unsigned int hour, minute, second;
-				float temperature;
 				for (;;) {
-					class String const line = file.readStringUntil('\n');
-					position_1 = file.position();
-					if (!line.length()) {
-						/* end of file */
-						file.close();
-						return;
+					class String const s = data_file.readStringUntil(',');
+					if (!s.length()) break;
+					bool const sent = s != "0";
+					struct Data data;
+					if (!readln_Data(&data, &data_file)) {
+						Serial_println("Upload: invalid data");
+						break;
 					}
-					if (
-						sscanf(
-							line.c_str(),
-							"%1u,%4u-%2u-%2uT%2u:%2u:%2uZ,%f",
-							&sent,
-							&year, &month, &day,
-							&hour, &minute, &second,
-							&temperature
-						) != 8
-					) {
-						/* invalid data record */
-						Serial_print("Upload: invalid data: ");
-						Serial_println(line);
-						position = position_1;
-						file.close();
-						return;
-					};
+
+					position = data_file.position();
 					if (!sent) {
 						wait_position = position;
-						file.close();
-						struct Data const data = {
-							.time = {
-								.year = (unsigned short int)year,
-								.month = (unsigned char)month,
-								.day = (unsigned char)day,
-								.hour = (unsigned char)hour,
-								.minute = (unsigned char)minute,
-								.second = (unsigned char)second
-							}
-							/* TODO: values */
-						};
 						LORA::send(&data);
+						break;
 					}
-					position = position_1;
 				}
+				data_file.close();
 			}
 		} upload_schedule;
 	#endif
@@ -875,6 +852,7 @@ static bool setup_error;
 		#ifdef ENABLE_LTR
 			if (!setup_error) {
 				if (LTR.begin()) {
+					LTR.setMode(LTR390_MODE_UVS);
 					any_println("LTR390 sensor found");
 				} else {
 					setup_error = true;
