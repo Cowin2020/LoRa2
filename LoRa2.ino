@@ -738,12 +738,14 @@ static bool setup_error;
 						break;
 					}
 
-					position = data_file.position();
 					if (!sent) {
 						wait_position = position;
+						position = data_file.position();
 						LORA::send(&data);
 						break;
 					}
+
+					position = data_file.position();
 				}
 				data_file.close();
 			}
@@ -889,62 +891,64 @@ static bool setup_error;
 		OLED_display();
 	}
 
-	static void LoRa_receive_ACK(void) {
-		Device const device = LoRa.read();
-		if (device != DEVICE_ID) return;
-		SerialNumber serial;
-		if (!LORA::receive_payload("ACK", &serial, sizeof serial)) return;
-		if (!resend_schedule.stop_ack(serial)) return;
+	namespace LORA {
+		static void receive_ACK(void) {
+			Device const device = LoRa.read();
+			if (device != DEVICE_ID) return;
+			SerialNumber serial;
+			if (!receive_payload("ACK", &serial, sizeof serial)) return;
+			if (!resend_schedule.stop_ack(serial)) return;
 
-		#ifdef ENABLE_SD_CARD
-			File file = SD.open(data_file_path, "r+");
-			if (!file) {
-				Serial_println("LoRa ACK: fail to open data file");
-				return;
-			}
-			if (!file.seek(wait_position)) {
-				Serial_print("LoRa ACK: fail to seek data file: ");
-				Serial_println(wait_position);
-				return;
-			}
-			file.write('1');
-			file.close();
+			#ifdef ENABLE_SD_CARD
+				File file = SD.open(data_file_path, "r+");
+				if (!file) {
+					Serial_println("LoRa ACK: fail to open data file");
+					return;
+				}
+				if (!file.seek(wait_position)) {
+					Serial_print("LoRa ACK: fail to seek data file: ");
+					Serial_println(wait_position);
+					return;
+				}
+				file.write('1');
+				file.close();
 
-			upload_schedule.start(millis());
-		#endif
-	}
-
-	static void LoRa_receive(signed int const packet_size) {
-		if (!packet_size) return;
-		uint8_t const packet_type = LoRa.read();
-		switch (packet_type) {
-		case PACKET_SEND:
-			/* SEND sent by other senders */
-			break;
-		case PACKET_TIME:
-			if (packet_size != 1 + CIPHER_IV_LENGTH + sizeof (struct DateTime) + CIPHER_TAG_SIZE) {
-				Serial_print("LoRa TIME: incorrect packet size: ");
-				Serial_println(packet_size);
-				break;
-			}
-			LORA::receive_TIME();
-			break;
-		case PACKET_ACK:
-			if (packet_size != 1 + 1 + CIPHER_IV_LENGTH + sizeof (SerialNumber) + CIPHER_TAG_SIZE) {
-				Serial_print("LoRa ACK: incorrect packet size: ");
-				Serial_println(packet_size);
-				break;
-			}
-			LoRa_receive_ACK();
-			break;
-		default:
-			Serial_print("LoRa: incorrect packet type: ");
-			Serial_println(packet_type);
+				upload_schedule.start(millis());
+			#endif
 		}
 
-		/* add entropy to RNG */
-		unsigned long int const microseconds = micros();
-		RNG.stir((uint8_t const *)&microseconds, sizeof microseconds, 8);
+		static void receive(signed int const packet_size) {
+			if (!packet_size) return;
+			uint8_t const packet_type = LoRa.read();
+			switch (packet_type) {
+			case PACKET_SEND:
+				/* SEND sent by other senders */
+				break;
+			case PACKET_TIME:
+				if (packet_size != 1 + CIPHER_IV_LENGTH + sizeof (struct DateTime) + CIPHER_TAG_SIZE) {
+					Serial_print("LoRa TIME: incorrect packet size: ");
+					Serial_println(packet_size);
+					break;
+				}
+				receive_TIME();
+				break;
+			case PACKET_ACK:
+				if (packet_size != 1 + 1 + CIPHER_IV_LENGTH + sizeof (SerialNumber) + CIPHER_TAG_SIZE) {
+					Serial_print("LoRa ACK: incorrect packet size: ");
+					Serial_println(packet_size);
+					break;
+				}
+				receive_ACK();
+				break;
+			default:
+				Serial_print("LoRa: incorrect packet type: ");
+				Serial_println(packet_type);
+			}
+
+			/* add entropy to RNG */
+			unsigned long int const microseconds = micros();
+			RNG.stir((uint8_t const *)&microseconds, sizeof microseconds, 8);
+		}
 	}
 
 	void loop() {
@@ -952,14 +956,14 @@ static bool setup_error;
 			LED_flash();
 			return;
 		}
-		LoRa_receive(LoRa.parsePacket());
+		LORA::receive(LoRa.parsePacket());
 		measure_schedule.tick(millis());
 		RNG.loop();
-		LoRa_receive(LoRa.parsePacket());
+		LORA::receive(LoRa.parsePacket());
 		resend_schedule.tick(millis());
 		RNG.loop();
 		#ifdef ENABLE_SD_CARD
-			LoRa_receive(LoRa.parsePacket());
+			LORA::receive(LoRa.parsePacket());
 			upload_schedule.tick(millis());
 			RNG.loop();
 		#endif
@@ -1057,77 +1061,89 @@ static bool setup_error;
 		}
 	}
 
-	static void LoRa_send_ACK(Device const device, SerialNumber const serial) {
-		LoRa.beginPacket();
-		LoRa.write(uint8_t(PACKET_ACK));
-		LoRa.write(uint8_t(device));
-		LORA::send_payload("ACK", &serial, sizeof serial);
-		LoRa.endPacket(true);
-	}
-
-	static void LoRa_receive_SEND(void) {
-		Device const device = LoRa.read();
-		if (!(device >= 0 && device < NUMBER_OF_SENDERS)) return;
-		struct Payload_SEND payload;
-		if (!LORA::receive_payload("SEND", &payload, sizeof payload)) return;
-		if (payload.serial < serial_last[device-1] && !(serial_last[device-1] & ~(~(SerialNumber)0 >> 1)))
-			Serial_println("LoRa SEND: serial number out of order");
-		class String const time = String_from_DateTime(&payload.data.time);
-		serial_last[device-1] = payload.serial;
-		#ifdef ENABLE_OLED_OUTPUT
-			OLED_home();
-			OLED_println(WiFi_status_message(WiFi.status()));
-			OLED_print("HTTP: ");
-			OLED_println(HTTP_status);
-			OLED_print("Device ");
-			OLED_print(device);
-			OLED_print(" Serial ");
-			OLED_println(payload.serial);
-			OLED_println(time);
-			#ifdef ENABLE_DALLAS
-				OLED_print("Dallas temp.: ");
-				OLED_println(payload.data.dallas_temperature);
-			#endif
-			#ifdef ENABLE_BME
-				OLED_print("BME temp.: ");
-				OLED_println(payload.data.bme_temperature);
-				OLED_print("BME pressure: ");
-				OLED_println(payload.data.bme_pressure);
-				OLED_print("BME humidity: ");
-				OLED_println(payload.data.bme_humidity);
-			#endif
-			#ifdef ENABLE_LTR
-				OLED_print("LTR UV: ");
-				OLED_println(payload.data.ltr_ultraviolet);
-			#endif
-			OLED_println(OLED_message);
-			OLED_message = "";
-			OLED_display();
-		#endif
-		if (!WiFi_upload(device, payload.serial, &payload.data)) return;
-		LoRa_send_ACK(device, payload.serial);
-	}
-
-	static void LoRa_receive(signed int const packet_size) {
-		if (!packet_size) return;
-		uint8_t const packet_type = LoRa.read();
-		switch (packet_type) {
-		case PACKET_SEND:
-			if (packet_size != 1 + 1 + CIPHER_IV_LENGTH + sizeof (struct Payload_SEND) + CIPHER_TAG_SIZE) {
-				Serial_print("LoRa SEND: incorrect packet size: ");
-				Serial_println(packet_size);
-				break;
-			}
-			LoRa_receive_SEND();
-			break;
-		default:
-			Serial_print("LoRa: incorrect packet type: ");
-			Serial_println(packet_type);
+	namespace LORA {
+		static void send_ACK(Device const device, SerialNumber const serial) {
+			LoRa.beginPacket();
+			LoRa.write(uint8_t(PACKET_ACK));
+			LoRa.write(uint8_t(device));
+			LORA::send_payload("ACK", &serial, sizeof serial);
+			LoRa.endPacket(true);
 		}
 
-		/* add entropy to RNG */
-		unsigned long int const microseconds = micros();
-		RNG.stir((uint8_t const *)&microseconds, sizeof microseconds, 8);
+		static void receive_SEND(void) {
+			Device const device = LoRa.read();
+			if (!(device > 0 && device <= NUMBER_OF_SENDERS)) return;
+			struct Payload_SEND payload;
+			if (!LORA::receive_payload("SEND", &payload, sizeof payload)) return;
+			if (payload.serial < serial_last[device-1] && !(serial_last[device-1] & ~(~(SerialNumber)0 >> 1)))
+				Serial_println("LoRa SEND: serial number out of order");
+			class String const time = String_from_DateTime(&payload.data.time);
+			serial_last[device-1] = payload.serial;
+			#ifdef ENABLE_OLED_OUTPUT
+				OLED_home();
+			#endif
+			if (!WiFi_upload(device, payload.serial, &payload.data)) {
+				#ifdef ENABLE_OLED_OUTPUT
+					OLED_println(WiFi_status_message(WiFi.status()));
+					OLED_print("HTTP: ");
+					OLED_println(HTTP_status);
+				#endif
+				OLED_println(OLED_message);
+				OLED_message = "";
+				OLED_display();
+				return;
+			}
+			send_ACK(device, payload.serial);
+			#ifdef ENABLE_OLED_OUTPUT
+				signed int const WiFi_status = WiFi.status();
+				OLED_print("Device ");
+				OLED_print(device);
+				OLED_print(" Serial ");
+				OLED_println(payload.serial);
+				OLED_println(time);
+				#ifdef ENABLE_DALLAS
+					OLED_print("Dallas temp.: ");
+					OLED_println(payload.data.dallas_temperature);
+				#endif
+				#ifdef ENABLE_BME
+					OLED_print("BME temp.: ");
+					OLED_println(payload.data.bme_temperature);
+					OLED_print("BME pressure: ");
+					OLED_println(payload.data.bme_pressure, 0);
+					OLED_print("BME humidity: ");
+					OLED_println(payload.data.bme_humidity);
+				#endif
+				#ifdef ENABLE_LTR
+					OLED_print("LTR UV: ");
+					OLED_println(payload.data.ltr_ultraviolet);
+				#endif
+				OLED_println(OLED_message);
+				OLED_message = "";
+				OLED_display();
+			#endif
+		}
+
+		static void receive(signed int const packet_size) {
+			if (!packet_size) return;
+			uint8_t const packet_type = LoRa.read();
+			switch (packet_type) {
+			case PACKET_SEND:
+				if (packet_size != 1 + 1 + CIPHER_IV_LENGTH + sizeof (struct Payload_SEND) + CIPHER_TAG_SIZE) {
+					Serial_print("LoRa SEND: incorrect packet size: ");
+					Serial_println(packet_size);
+					break;
+				}
+				receive_SEND();
+				break;
+			default:
+				Serial_print("LoRa: incorrect packet type: ");
+				Serial_println(packet_type);
+			}
+
+			/* add entropy to RNG */
+			unsigned long int const microseconds = micros();
+			RNG.stir((uint8_t const *)&microseconds, sizeof microseconds, 8);
+		}
 	}
 
 	static class Synchronize : public Schedule {
@@ -1196,7 +1212,7 @@ static bool setup_error;
 			LED_flash();
 			return;
 		}
-		LoRa_receive(LoRa.parsePacket());
+		LORA::receive(LoRa.parsePacket());
 		if (WiFi.status() == WL_CONNECTED) {
 			if (NTP.update()) {
 				#ifdef ENABLE_CLOCK
