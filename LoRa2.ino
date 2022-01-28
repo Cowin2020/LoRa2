@@ -762,7 +762,14 @@ static bool setup_error;
 			OLED_home();
 			struct Data data;
 			data.time = RTC::now();
-			Serial_print("Time: ");
+			#ifdef ENABLE_COM_OUTPUT
+				Serial.print("Time: ");
+				Serial.printf(
+					"%04u-%02u-%02uT%02u:%02u:%02uZ",
+					data.time.year, data.time.month, data.time.day,
+					data.time.hour, data.time.minute, data.time.second
+				);
+			#endif
 			#ifdef ENABLE_DALLAS
 				data.dallas_temperature = dallas.getTempCByIndex(0);
 				any_print("Dallas temp.: ");
