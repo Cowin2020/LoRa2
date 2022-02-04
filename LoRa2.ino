@@ -30,6 +30,8 @@ LoRa sender and receiver
 #define WIFI_PASS "PASSWORD"
 #define HTTP_UPLOAD_FORMAT "http://www.example.com/%1$u/%2$lu/%3$s/%4$F"
 #define HTTP_UPLOAD_LENGTH 256
+#define HTTP_AUTHORIZATION_TYPE ""
+#define HTTP_AUTHORIZATION_CODE ""
 #define NTP_SERVER "stdtime.gov.hk"
 #define SECRET_KEY "This is secret!"
 #define DATA_FILE_PATH "/data.csv"
@@ -1038,6 +1040,12 @@ static bool setup_error;
 		Serial_print("Upload to ");
 		Serial_println(URL);
 		HTTP_client.begin(URL);
+		static char const authorization_type[] = HTTP_AUTHORIZATION_TYPE;
+		static char const authorization_code[] = HTTP_AUTHORIZATION_CODE;
+		if (authorization_type[0] && authorization_code[0]) {
+			HTTP_client.setAuthorizationType(authorization_type);
+			HTTP_client.setAuthorization(authorization_code);
+		}
 		HTTP_status = HTTP_client.GET();
 		Serial_print("HTTP status: ");
 		Serial_println(HTTP_status);
