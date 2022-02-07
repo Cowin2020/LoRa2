@@ -499,21 +499,27 @@ static bool setup_error;
 	#endif
 
 	#ifndef ENABLE_CLOCK
-		#include <ESP32Time.h>
+		#include <RTClib.h>
 		namespace RTC {
 			static bool clock_available;
-			static class ESP32Time esp32time;
+			static class RTC_Millis internal_clock;
 
-			static void initialize(void) {
+			static bool initialize(void) {
 				clock_available = false;
+				return true;
 			}
 			
 			static void set(struct FullTime const *const fulltime) {
-				esp32time.setTime(
-					fulltime->second, fulltime->minute, fulltime->hour,
-					fulltime->day, fulltime->month, fulltime->year
+				class DateTime const datetime(
+					fulltime->year, fulltime->month, fulltime->day,
+					fulltime->hour, fulltime->minute, fulltime->second
 				);
-				clock_available = true;
+				if (clock_available) {
+					internal_clock.adjust(datetime);
+				} else {
+					internal_clock.begin(datetime);
+					clock_available = true;
+				}
 			}
 
 			static bool ready(void) {
@@ -521,13 +527,14 @@ static bool setup_error;
 			}
 
 			static struct FullTime now(void) {
+				class DateTime const datetime = internal_clock.now();
 				return (struct FullTime){
-					.year = (unsigned short int)esp32time.getYear(),
-					.month = (unsigned char)esp32time.getMonth(),
-					.day = (unsigned char)esp32time.getDay(),
-					.hour = (unsigned char)esp32time.getHour(),
-					.minute = (unsigned char)esp32time.getMinute(),
-					.second = (unsigned char)esp32time.getSecond()
+					.year = (unsigned short int)datetime.year(),
+					.month = (unsigned char)datetime.month(),
+					.day = (unsigned char)datetime.day(),
+					.hour = (unsigned char)datetime.hour(),
+					.minute = (unsigned char)datetime.minute(),
+					.second = (unsigned char)datetime.second()
 				};
 			}
 		}
@@ -1039,7 +1046,7 @@ static bool setup_error;
 				struct tm time;
 				gmtime_r(&epoch, &time);
 				return (struct FullTime){
-					.year = (unsigned short int)(1900 + time.tm_year),
+					.year = (unsigned short int)(1900U + time.tm_year),
 					.month = (unsigned char)(time.tm_mon + 1),
 					.day = (unsigned char)time.tm_mday,
 					.hour = (unsigned char)time.tm_hour,
@@ -1272,12 +1279,12 @@ static bool setup_error;
 					struct tm time;
 					gmtime_r(&epoch, &time);
 					struct FullTime const fulltime = {
-						.year = 1900U+time.tm_year,
-						.month = time.tm_mon+1,
-						.day = time.tm_mday,
-						.hour = time.tm_hour,
-						.minute = time.tm_min,
-						.second = time.tm_sec
+						.year = (unsigned short int)(1900U + time.tm_year),
+						.month = (unsigned char)(time.tm_mon + 1),
+						.day = (unsigned char)time.tm_mday,
+						.hour = (unsigned char)time.tm_hour,
+						.minute = (unsigned char)time.tm_min,
+						.second = (unsigned char)time.tm_sec
 					};
 					RTC::set(&fulltime);
 				#endif
