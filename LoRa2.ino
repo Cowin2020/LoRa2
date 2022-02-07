@@ -9,12 +9,15 @@ LoRa sender and receiver
 #define DEVICE_ID 0
 #define NUMBER_OF_SENDERS 1
 
+/* Feature Constants */
+#define CLOCK_PCF85063TP 1
+#define CLOCK_DS1307 2
 
 /* Features */
 #define ENABLE_LED
 #define ENABLE_COM_OUTPUT
 #define ENABLE_OLED_OUTPUT
-#define ENABLE_CLOCK
+#define ENABLE_CLOCK CLOCK_DS1307
 #define ENABLE_SD_CARD
 #define ENABLE_DALLAS
 #define ENABLE_BME
@@ -203,7 +206,7 @@ inline void any_println(TYPE x, int option) {
 	inline static void LED_flash(void) {}
 #endif
 
-struct DateTime {
+struct FullTime {
 	unsigned short int year;
 	unsigned char month;
 	unsigned char day;
@@ -212,61 +215,98 @@ struct DateTime {
 	unsigned char second;
 };
 
-static class String String_from_DateTime(struct DateTime const *const datetime) {
+static class String String_from_FullTime(struct FullTime const *const fulltime) {
 	char buffer[48];
 	snprintf(
 		buffer, sizeof buffer,
 		"%04u-%02u-%02uT%02u:%02u:%02uZ",
-		datetime->year, datetime->month, datetime->day,
-		datetime->hour, datetime->minute, datetime->second
+		fulltime->year, fulltime->month, fulltime->day,
+		fulltime->hour, fulltime->minute, fulltime->second
 	);
 	return String(buffer);
 }
 
 #ifdef ENABLE_CLOCK
-	#include <PCF85063TP.h>
-	namespace RTC {
-		class PCD85063TP external_clock;
+	#if ENABLE_CLOCK == CLOCK_PCF85063TP
+		#include <PCF85063TP.h>
+		namespace RTC {
+			class PCD85063TP external_clock;
 
-		static void initialize(void) {
-			external_clock.begin();
-			external_clock.startClock();
-		}
+			static bool initialize(void) {
+				external_clock.begin();
+				external_clock.startClock();
+				return true;
+			}
 
-		static void set(struct DateTime const *const datetime) {
-			external_clock.stopClock();
-			external_clock.fillByYMD(datetime->year, datetime->month, datetime->day);
-			external_clock.fillByHMS(datetime->hour, datetime->minute, datetime->second);
-			external_clock.setTime();
-			external_clock.startClock();
-		}
+			static void set(struct FullTime const *const fulltime) {
+				external_clock.stopClock();
+				external_clock.fillByYMD(fulltime->year, fulltime->month, fulltime->day);
+				external_clock.fillByHMS(fulltime->hour, fulltime->minute, fulltime->second);
+				external_clock.setTime();
+				external_clock.startClock();
+			}
 
-		static bool ready(void) {
-			static bool available = false;
-			if (available) return true;
-			external_clock.getTime();
-			available =
-				1 <= external_clock.year       && external_clock.year       <= 99 &&
-				1 <= external_clock.month      && external_clock.month      <= 12 &&
-				1 <= external_clock.dayOfMonth && external_clock.dayOfMonth <= 30 &&
-				0 <= external_clock.hour       && external_clock.hour       <= 23 &&
-				0 <= external_clock.minute     && external_clock.minute     <= 59 &&
-				0 <= external_clock.second     && external_clock.second     <= 59;
-			return available;
-		}
+			static bool ready(void) {
+				static bool available = false;
+				if (available) return true;
+				external_clock.getTime();
+				available =
+					1 <= external_clock.year       && external_clock.year       <= 99 &&
+					1 <= external_clock.month      && external_clock.month      <= 12 &&
+					1 <= external_clock.dayOfMonth && external_clock.dayOfMonth <= 30 &&
+					0 <= external_clock.hour       && external_clock.hour       <= 23 &&
+					0 <= external_clock.minute     && external_clock.minute     <= 59 &&
+					0 <= external_clock.second     && external_clock.second     <= 59;
+				return available;
+			}
 
-		static struct DateTime now(void) {
-			external_clock.getTime();
-			return {
-				.year = (unsigned short int)(2000U + external_clock.year),
-				.month = external_clock.month,
-				.day = external_clock.dayOfMonth,
-				.hour = external_clock.hour,
-				.minute = external_clock.minute,
-				.second = external_clock.second
-			};
+			static struct FullTime now(void) {
+				external_clock.getTime();
+				return (struct FullTime){
+					.year = (unsigned short int)(2000U + external_clock.year),
+					.month = external_clock.month,
+					.day = external_clock.dayOfMonth,
+					.hour = external_clock.hour,
+					.minute = external_clock.minute,
+					.second = external_clock.second
+				};
+			}
 		}
-	}
+	#elif ENABLE_CLOCK == CLOCK_DS1307
+		#include <RTClib.h>
+		namespace RTC {
+			class RTC_DS1307 external_clock;
+
+			static bool initialize(void) {
+				return external_clock.begin() && external_clock.isrunning();
+			}
+
+			static void set(struct FullTime const *const fulltime) {
+				class DateTime const datetime(
+					fulltime->year, fulltime->month, fulltime->day,
+					fulltime->hour, fulltime->minute, fulltime->second
+				);
+				external_clock.adjust(datetime);
+			}
+
+			static bool ready(void) {
+				class DateTime const datetime = external_clock.now();
+				return datetime.isValid();
+			}
+
+			static struct FullTime now(void) {
+				class DateTime const datetime = external_clock.now();
+				return (struct FullTime){
+					.year = datetime.year(),
+					.month = datetime.month(),
+					.day = datetime.day(),
+					.hour = datetime.hour(),
+					.minute = datetime.minute(),
+					.second = datetime.second()
+				};
+			}
+		}
+	#endif
 #endif
 
 class Schedule {
@@ -406,7 +446,7 @@ namespace LORA {
 	}
 }
 
-struct Data {
+struct [[gnu::packed]] Data {
 	#ifdef ENABLE_DALLAS
 		float dallas_temperature;
 	#endif
@@ -418,15 +458,13 @@ struct Data {
 	#ifdef ENABLE_LTR
 		float ltr_ultraviolet;
 	#endif
-	struct DateTime time;
+	struct FullTime time;
 };
-//	__attribute__((packed));
 
-struct Payload_SEND {
+struct [[gnu::packed]] Payload_SEND {
 	SerialNumber serial;
 	struct Data data;
 };
-//	__attribute__((packed));
 
 static bool setup_error;
 
@@ -470,10 +508,10 @@ static bool setup_error;
 				clock_available = false;
 			}
 			
-			static void set(struct DateTime const *const datetime) {
+			static void set(struct FullTime const *const fulltime) {
 				esp32time.setTime(
-					datetime->second, datetime->minute, datetime->hour,
-					datetime->day, datetime->month, datetime->year
+					fulltime->second, fulltime->minute, fulltime->hour,
+					fulltime->day, fulltime->month, fulltime->year
 				);
 				clock_available = true;
 			}
@@ -482,8 +520,8 @@ static bool setup_error;
 				return clock_available;
 			}
 
-			static struct DateTime now(void) {
-				return {
+			static struct FullTime now(void) {
+				return (struct FullTime){
 					.year = (unsigned short int)esp32time.getYear(),
 					.month = (unsigned char)esp32time.getMonth(),
 					.day = (unsigned char)esp32time.getDay(),
@@ -554,7 +592,7 @@ static bool setup_error;
 		}
 
 		static void receive_TIME(void) {
-			struct DateTime payload;
+			struct FullTime payload;
 			if (!LORA::receive_payload("TIME", &payload, sizeof payload))
 				return;
 
@@ -767,7 +805,7 @@ static bool setup_error;
 			#ifdef ENABLE_COM_OUTPUT
 				Serial.print("Time: ");
 				Serial.printf(
-					"%04u-%02u-%02uT%02u:%02u:%02uZ",
+					"%04u-%02u-%02uT%02u:%02u:%02uZ\n",
 					data.time.year, data.time.month, data.time.day,
 					data.time.hour, data.time.minute, data.time.second
 				);
@@ -934,7 +972,7 @@ static bool setup_error;
 				/* SEND sent by other senders */
 				break;
 			case PACKET_TIME:
-				if (packet_size != 1 + CIPHER_IV_LENGTH + sizeof (struct DateTime) + CIPHER_TAG_SIZE) {
+				if (packet_size != 1 + CIPHER_IV_LENGTH + sizeof (struct FullTime) + CIPHER_TAG_SIZE) {
 					Serial_print("LoRa TIME: incorrect packet size: ");
 					Serial_println(packet_size);
 					break;
@@ -996,11 +1034,11 @@ static bool setup_error;
 				return NTP.isTimeSet();
 			}
 
-			static struct DateTime now(void) {
+			static struct FullTime now(void) {
 				time_t const epoch = NTP.getEpochTime();
 				struct tm time;
 				gmtime_r(&epoch, &time);
-				return {
+				return (struct FullTime){
 					.year = (unsigned short int)(1900 + time.tm_year),
 					.month = (unsigned char)(time.tm_mon + 1),
 					.day = (unsigned char)time.tm_mday,
@@ -1018,7 +1056,7 @@ static bool setup_error;
 			Serial_println("Upload no WiFi");
 			return false;
 		}
-		class String const time = String_from_DateTime(&data->time);
+		class String const time = String_from_FullTime(&data->time);
 		class HTTPClient HTTP_client;
 		char URL[HTTP_UPLOAD_LENGTH];
 		snprintf(
@@ -1092,7 +1130,7 @@ static bool setup_error;
 			if (!LORA::receive_payload("SEND", &payload, sizeof payload)) return;
 			if (payload.serial < serial_last[device-1] && !(serial_last[device-1] & ~(~(SerialNumber)0 >> 1)))
 				Serial_println("LoRa SEND: serial number out of order");
-			class String const time = String_from_DateTime(&payload.data.time);
+			class String const time = String_from_FullTime(&payload.data.time);
 			serial_last[device-1] = payload.serial;
 			#ifdef ENABLE_OLED_OUTPUT
 				OLED_home();
@@ -1167,7 +1205,7 @@ static bool setup_error;
 		virtual void run(Time const now) {
 			Schedule::run(now);
 			if (!RTC::ready()) return;
-			struct DateTime const payload = RTC::now();
+			struct FullTime const payload = RTC::now();
 
 			LoRa.beginPacket();
 			LoRa.write(uint8_t(PACKET_TIME));
@@ -1211,8 +1249,7 @@ static bool setup_error;
 		/* initialize real-time clock */
 		#ifdef ENABLE_CLOCK
 			if (!setup_error) {
-				RTC::external_clock.begin();
-				RTC::external_clock.startClock();
+				setup_error = RTC::initialize();
 				NTP.begin();
 				NTP.setUpdateInterval(SYNCHONIZE_INTERVAL);
 			}
@@ -1234,11 +1271,15 @@ static bool setup_error;
 					time_t const epoch = NTP.getEpochTime();
 					struct tm time;
 					gmtime_r(&epoch, &time);
-					RTC::external_clock.stopClock();
-					RTC::external_clock.fillByYMD(1900+time.tm_year, time.tm_mon+1, time.tm_mday);
-					RTC::external_clock.fillByHMS(time.tm_hour, time.tm_min, time.tm_sec);
-					RTC::external_clock.setTime();
-					RTC::external_clock.startClock();
+					struct FullTime const fulltime = {
+						.year = 1900U+time.tm_year,
+						.month = time.tm_mon+1,
+						.day = time.tm_mday,
+						.hour = time.tm_hour,
+						.minute = time.tm_min,
+						.second = time.tm_sec
+					};
+					RTC::set(&fulltime);
 				#endif
 			}
 		}

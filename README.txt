@@ -54,8 +54,10 @@ Each device should have a unique ID.
 
 Type: Single byte integer
 Values:
-	0:     LoRa-WiFi gateway
-	1-255: terminal measuring device
+	0
+	     LoRa-WiFi gateway
+	1-255
+		terminal measuring device
 
 NUMBER_OF_SENDERS
 -----------------
@@ -90,7 +92,13 @@ ENABLE_CLOCK
 
 Grove high precision RTC is used
 
-Type: defined or undefined
+Values:
+	(undefined)
+		Use internal clock only
+	CLOCK_PCF85063TP
+		Grove high precision real-time clock
+	CLOCK_DS1307
+		DS1307 real-time clock
 
 ENABLE_SD_CARD
 --------------
