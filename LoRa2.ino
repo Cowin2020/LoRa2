@@ -229,6 +229,7 @@ static class String String_from_FullTime(struct FullTime const *const fulltime) 
 #ifdef ENABLE_CLOCK
 	#if ENABLE_CLOCK == CLOCK_PCF85063TP
 		#include <PCF85063TP.h>
+
 		namespace RTC {
 			class PCD85063TP external_clock;
 
@@ -274,6 +275,7 @@ static class String String_from_FullTime(struct FullTime const *const fulltime) 
 		}
 	#elif ENABLE_CLOCK == CLOCK_DS1307
 		#include <RTClib.h>
+
 		namespace RTC {
 			class RTC_DS1307 external_clock;
 
@@ -500,6 +502,7 @@ static bool setup_error;
 
 	#ifndef ENABLE_CLOCK
 		#include <RTClib.h>
+
 		namespace RTC {
 			static bool clock_available;
 			static class RTC_Millis internal_clock;
