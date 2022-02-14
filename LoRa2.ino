@@ -696,8 +696,12 @@ static bool setup_error;
 		}
 
 		static void dump_log_file(void) {
-			Serial_println("Log file BEGIN");
 			File file = SD.open(data_file_path, "r");
+			if (!file) {
+				Serial_print("Cannot open log file");
+				return;
+			}
+			Serial_println("Log file BEGIN");
 			for (;;) {
 				signed int const c = file.read();
 				if (c < 0) break;
@@ -815,6 +819,13 @@ static bool setup_error;
 			#ifdef ENABLE_COM_OUTPUT
 				Serial.print("Time: ");
 				Serial.printf(
+					"%04u-%02u-%02uT%02u:%02u:%02uZ\n",
+					data.time.year, data.time.month, data.time.day,
+					data.time.hour, data.time.minute, data.time.second
+				);
+			#endif
+			#ifdef ENABLE_OLED_OUTPUT
+				OLED.printf(
 					"%04u-%02u-%02uT%02u:%02u:%02uZ\n",
 					data.time.year, data.time.month, data.time.day,
 					data.time.hour, data.time.minute, data.time.second
@@ -1097,7 +1108,7 @@ static bool setup_error;
 		HTTP_status = HTTP_client.GET();
 		Serial_print("HTTP status: ");
 		Serial_println(HTTP_status);
-		if (HTTP_status != 200) return false;
+		if (not (HTTP_status >= 200 and HTTP_status < 300)) return false;
 		return true;
 	}
 
