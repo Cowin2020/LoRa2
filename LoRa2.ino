@@ -751,7 +751,7 @@ static bool setup_error;
 		}
 
 		static void append_data_file(struct Data const *const data) {
-			File file = SD.open(data_file_path, "a", true);
+			File file = SD.open(data_file_path, "a");
 			if (!file) {
 				any_println("Cannot append data file");
 			} else {
