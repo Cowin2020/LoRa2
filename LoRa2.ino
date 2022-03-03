@@ -12,12 +12,13 @@ LoRa sender and receiver
 /* Feature Constants */
 #define CLOCK_PCF85063TP 1
 #define CLOCK_DS1307 2
+#define CLOCK_DS3231 3
 
 /* Features */
 #define ENABLE_LED
 #define ENABLE_COM_OUTPUT
 #define ENABLE_OLED_OUTPUT
-#define ENABLE_CLOCK CLOCK_DS1307
+#define ENABLE_CLOCK CLOCK_DS3231
 #define ENABLE_SD_CARD
 #define ENABLE_DALLAS
 #define ENABLE_BME
@@ -273,14 +274,28 @@ static class String String_from_FullTime(struct FullTime const *const fulltime) 
 				};
 			}
 		}
-	#elif ENABLE_CLOCK == CLOCK_DS1307
+	#elif ENABLE_CLOCK == CLOCK_DS1307 || ENABLE_CLOCK == CLOCK_DS3231
 		#include <RTClib.h>
 
 		namespace RTC {
-			class RTC_DS1307 external_clock;
+			#if ENABLE_CLOCK == CLOCK_DS1307
+				class RTC_DS1307 external_clock;
+			#elif ENABLE_CLOCK == CLOCK_DS3231
+				class RTC_DS3231 external_clock;
+			#endif
 
 			static bool initialize(void) {
-				return external_clock.begin() && external_clock.isrunning();
+				if (!external_clock.begin()) {
+					any_println("Clock not found");
+					return false;
+				}
+				#if ENABLE_CLOCK == CLOCK_DS1307
+					if (!external_clock.isrunning()) {
+						any_println("DS1307 not running");
+						return false;
+					}
+				#endif
+				return true;
 			}
 
 			static void set(struct FullTime const *const fulltime) {
@@ -953,7 +968,8 @@ static bool setup_error;
 		#endif
 
 		/* initialize real-time clock */
-		RTC::initialize();
+		if (!setup_error)
+			setup_error = !RTC::initialize();
 
 		/* display setup result on OLED */
 		OLED_display();
