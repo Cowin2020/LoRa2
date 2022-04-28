@@ -216,6 +216,29 @@ Period in milliseconds to measure data
 
 Type: natural number
 
+ROUTER_TOPOLOGY
+---------------
+
+Setting of LoRa message routing.
+Circular routing should be avoided.
+
+Type: array of pairs of device IDs (upstream device, downstream device).
+
+Example: {{2, 1}, {0, 1}, {2, 4}, {4, 3}}
+
+The topology will be:
+
+     -------- [1]
+    /        /
+   /        /
+[0] --- [2]
+           \
+            \
+             [4] --- [3]
+
+Device 1 sends data through device 2 or directly sends to device 0 (gateway device).
+Device 4 only sends data through device 2, and device 3 only send through device 4.
+
 DALLAS_PIN
 ----------
 
