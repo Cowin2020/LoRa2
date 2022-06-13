@@ -12,6 +12,8 @@ LoRa sender and receiver
 #define CLOCK_PCF85063TP 1
 #define CLOCK_DS1307 2
 #define CLOCK_DS3231 3
+#define BATTERY_GAUGE_DFROBOT 1
+#define BATTERY_GAUGE_LC709203F 2
 
 /* Features */
 #define ENABLE_LED
@@ -19,6 +21,7 @@ LoRa sender and receiver
 #define ENABLE_OLED_OUTPUT
 #define ENABLE_CLOCK CLOCK_DS3231
 #define ENABLE_SD_CARD
+#define ENABLE_BATTERY_GAUGE BATTERY_GAUGE_DFROBOT
 #define ENABLE_DALLAS
 #define ENABLE_BME
 #define ENABLE_LTR
@@ -26,7 +29,12 @@ LoRa sender and receiver
 /* Software Parameters */
 #define WIFI_SSID "SSID"
 #define WIFI_PASS "PASSWORD"
-#define HTTP_UPLOAD_FORMAT "http://www.example.com/upload?device=%1$u&serial=%2$u&time=%3$s&dallas=%4$F&temperature=%5$F&pressure=%6$F&humidity=%7$F&ultraviolet=%8$F"
+#define HTTP_UPLOAD_FORMAT \
+	"http://www.example.com/upload?device=%1$u&serial=%2$u&time=%3$s" \
+	"&voltage=%4$F&battery=%5$F" \
+	"&dallas=%6$F" \
+	"&temperature=%7$F&pressure=%8$F&humidity=%9$F" \
+	"&ultraviolet=%10$F"
 #define HTTP_UPLOAD_LENGTH 256
 #define HTTP_AUTHORIZATION_TYPE ""
 #define HTTP_AUTHORIZATION_CODE ""
@@ -534,6 +542,10 @@ namespace LORA {
 
 struct [[gnu::packed]] Data {
 	struct FullTime time;
+	#if ENABLE_BATTERY_GAUGE == BATTERY_GAUGE_DFROBOT || ENABLE_BATTERY_GAUGE == BATTERY_GAUGE_LC709203F
+		float battery_voltage;
+		float battery_percentage;
+	#endif
 	#ifdef ENABLE_DALLAS
 		float dallas_temperature;
 	#endif
@@ -556,6 +568,16 @@ static bool setup_error;
 		#include <SD.h>
 
 		static class SPIClass SPI_1(HSPI);
+	#endif
+
+	#if ENABLE_BATTERY_GAUGE == BATTERY_GAUGE_DFROBOT
+		#include <DFRobot_MAX17043.h>
+
+		static class DFRobot_MAX17043 battery;
+	#elif ENABLE_BATTERY_GAUGE == BATTERY_GAUGE_LC709203F
+		#include <Adafruit_LC709203F.h>
+
+		static class Adafruit_LC709203F battery;
 	#endif
 
 	#ifdef ENABLE_DALLAS
@@ -961,6 +983,20 @@ static bool setup_error;
 					data.time.hour, data.time.minute, data.time.second
 				);
 			#endif
+			#ifdef ENABLE_BATTERY_GAUGE
+				#if ENABLE_BATTERY_GAUGE == BATTERY_GAUGE_DFROBOT
+					data.battery_voltage = battery.readVoltage() / 1000;
+					data.battery_percentage = battery.readPercentage();
+				#elif ENABLE_BATTERY_GAUGE == BATTERY_GAUGE_LC709203F
+					data.battery_voltage = battery.cellVoltage();
+					data.battery_percentage = battery.cellPercent();
+				#endif
+				any_print("Battery ");
+				any_print(data.battery_voltage);
+				any_print("V ");
+				any_print(data.battery_percentage);
+				any_println("%");
+			#endif
 			#ifdef ENABLE_DALLAS
 				data.dallas_temperature = dallas.getTempCByIndex(0);
 				any_print("Dallas temp.: ");
@@ -1024,6 +1060,11 @@ static bool setup_error;
 
 		/* initialize OLED */
 		OLED_initialize();
+
+		/* Initial battery gauge */
+		#if ENABLE_BATTERY_GAUGE == BATTERY_GAUGE_DFROBOT || ENABLE_BATTERY_GAUGE == BATTERY_GAUGE_LC709203F
+			battery.begin();
+		#endif
 
 		/* Initialize Dallas thermometer */
 		#ifdef ENABLE_DALLAS
@@ -1327,6 +1368,10 @@ static bool setup_error;
 			URL, sizeof URL,
 			HTTP_UPLOAD_FORMAT,
 			device, serial, time.c_str()
+			#ifdef ENABLE_BATTERY_GAUGE
+				, data->battery_voltage
+				, data->battery_percentage
+			#endif
 			#ifdef ENABLE_DALLAS
 				, data->dallas_temperature
 			#endif
