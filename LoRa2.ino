@@ -31,7 +31,7 @@ LoRa sender and receiver
 #define WIFI_PASS "PASSWORD"
 #define HTTP_UPLOAD_FORMAT \
 	"http://www.example.com/upload?device=%1$u&serial=%2$u&time=%3$s" \
-	"&voltage=%4$F&battery=%5$F" \
+	"&battery_voltage=%4$F&battery_percentage=%5$F" \
 	"&dallas=%6$F" \
 	"&temperature=%7$F&pressure=%8$F&humidity=%9$F" \
 	"&ultraviolet=%10$F"
