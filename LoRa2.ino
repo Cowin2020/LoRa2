@@ -16,6 +16,7 @@ LoRa sender and receiver
 #define BATTERY_GAUGE_LC709203F 2
 
 /* Features */
+//	#define ENABLE_SLEEP
 #define ENABLE_LED
 #define ENABLE_COM_OUTPUT
 #define ENABLE_OLED_OUTPUT
@@ -48,6 +49,7 @@ LoRa sender and receiver
 #define UPLOAD_INTERVAL 6000UL /* milliseconds */
 #define MEASURE_INTERVAL 60000UL /* milliseconds */ /* MUST: > UPLOAD_INTERVAL */
 #define ROUTER_TOPOLOGY {}
+#define SLEEP_MARGIN 1000 /* milliseconds */
 
 /* Hardware Parameters */
 #define COM_BAUD 115200
@@ -97,13 +99,10 @@ LoRa sender and receiver
 #include <RNG.h>
 #include <AES.h>
 #include <GCM.h>
-//	#include <Wire.h>
 #include <SPI.h>
 #include <LoRa.h>
-
-#ifdef ENABLE_OLED_OUTPUT
-	#include <Adafruit_SSD1306.h>
-#endif
+#include <WiFi.h>
+#include <Adafruit_SSD1306.h>
 
 typedef uint8_t PacketType;
 typedef unsigned long int Time;
@@ -134,14 +133,28 @@ static char const cleanup_file_path[] PROGMEM = CLEANUP_FILE_PATH;
 #else
 	template <typename TYPE> inline void Serial_print(TYPE x) {}
 	template <typename TYPE> inline void Serial_println(TYPE x) {}
+	template <typename TYPE> inline void Serial_print(TYPE x, int option) {}
+	template <typename TYPE> inline void Serial_println(TYPE x, int option) {}
 #endif
 
+static Adafruit_SSD1306 OLED(OLED_WIDTH, OLED_HEIGHT);
+
+static void OLED_turn_off(void) {
+	OLED.ssd1306_command(SSD1306_CHARGEPUMP);
+	OLED.ssd1306_command(0x10);
+	OLED.ssd1306_command(SSD1306_DISPLAYOFF);
+}
+
+static void OLED_turn_on(void) {
+	OLED.ssd1306_command(SSD1306_CHARGEPUMP);
+	OLED.ssd1306_command(0x14);
+	OLED.ssd1306_command(SSD1306_DISPLAYON);
+}
+
 #ifdef ENABLE_OLED_OUTPUT
-	static Adafruit_SSD1306 OLED(OLED_WIDTH, OLED_HEIGHT);
 	static class String OLED_message;
 
 	static void OLED_initialize(void) {
-		//	Wire.begin(OLED_SDA, OLED_SCL);
 		OLED.begin(SSD1306_SWITCHCAPVCC, OLED_I2C_ADDR);
 		OLED.invertDisplay(false);
 		OLED.setRotation(2);
@@ -175,7 +188,10 @@ static char const cleanup_file_path[] PROGMEM = CLEANUP_FILE_PATH;
 		OLED.display();
 	}
 #else
-	inline static void OLED_initialize(void) {}
+	inline static void OLED_initialize(void) {
+		OLED.begin(SSD1306_SWITCHCAPVCC, OLED_I2C_ADDR);
+		OLED_turn_off();
+	}
 	inline static void OLED_home(void) {}
 	template <typename TYPE> inline void OLED_print(TYPE x) {}
 	template <typename TYPE> inline void OLED_println(TYPE x) {}
@@ -211,7 +227,7 @@ void Serial_dump(char const *const label, void const *const memory, size_t const
 	Serial.write('\n');
 }
 #else
-inline static Serial_dump(void *const memory, size_t const size) {}
+inline static void Serial_dump(void *const memory, size_t const size) {}
 #endif
 
 #ifdef ENABLE_LED
@@ -359,6 +375,7 @@ protected:
 public:
 	Schedule(Time initial_period);
 	bool enabled(void) const;
+	signed long int next_tick(Time now) const;
 	void start(Time now, Time addition_period = 0);
 	void stop(void);
 	virtual void run(Time now);
@@ -369,6 +386,10 @@ inline Schedule::Schedule(Time const initial_period) : enable(false), head(0), p
 
 inline bool Schedule::enabled(void) const {
 	return enable;
+}
+
+inline signed long int Schedule::next_tick(Time const now) const {
+	return head + period + margin - now;
 }
 
 inline void Schedule::start(Time const now, Time const addition_period) {
@@ -564,6 +585,8 @@ static bool setup_error;
 /* ************************************************************************** */
 
 #if DEVICE_TYPE == DEVICE_SENDER
+	#include <esp_sleep.h>
+
 	#ifdef ENABLE_SD_CARD
 		#include <SD.h>
 
@@ -1130,6 +1153,9 @@ static bool setup_error;
 		if (!setup_error)
 			setup_error = !RTC::initialize();
 
+		/* stop WiFi to lower power consumption */
+		WiFi.mode(WIFI_OFF);
+
 		/* display setup result on OLED */
 		OLED_display();
 	}
@@ -1299,12 +1325,26 @@ static bool setup_error;
 		LORA::receive(LoRa.parsePacket());
 		schedules.tick();
 		RNG.loop();
+
+		#ifdef ENABLE_SLEEP
+			Time const now = millis();
+			signed long int sleep_time = measure_schedule.next_tick(now);
+			if (!resend_schedule.enabled()) {
+				Time const resend_time = resend_schedule.next_tick(now);
+				if (sleep_time > resend_time) sleep_time = resend_time;
+			}
+			sleep_time -= SLEEP_MARGIN; /* margin time for recovering from sleep mode */
+			if (sleep_time > 0) {
+				Serial.print("Sleep: ");
+				Serial.println(sleep_time);
+				esp_sleep_enable_timer_wakeup(1000 * (sleep_time));
+				esp_light_sleep_start();
+			}
+		#endif
 	}
 
 #elif DEVICE_TYPE == DEVICE_RECEIVER /* ************************************* */
 
-	#include <WiFi.h>
-	#include <WiFiUdp.h>
 	#include <HTTPClient.h>
 	#include <NTPClient.h>
 
