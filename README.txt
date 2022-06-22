@@ -107,6 +107,20 @@ SD card is installed and used to store measurement data
 
 Type: defined or undefined
 
+ENABLE_SLEEP
+------------
+
+Go to sleep mode when it is not sending or measuring data
+
+Type: defined or undefined
+
+ENABLE_BATTERY_GAUGE
+--------------------
+
+Battery gauge is used to monitor battery usage
+
+Type: undefined or BATTERY_GAUGE_DFROBOT or BATTERY_GAUGE_LC709203F
+
 ENABLE_DALLAS
 -------------
 
@@ -114,15 +128,15 @@ Dallas thermometer is used
 
 Type: defined or undefined
 
-ENABLE_BME
-----------
+ENABLE_BME280
+-------------
 
 BME280 (temperature, pressure, humidity) sensor is used
 
 Type: defined or undefined
 
-ENABLE_LTR
-----------
+ENABLE_LTR390
+-------------
 
 LTR390 I2C sensor is used
 
@@ -204,6 +218,7 @@ UPLOAD_INTERVAL
 ---------------
 
 Maximum period in milliseconds to upload data if SD card is used
+
 This value should be larger than (ACK_TIMEOUT * (RESEND_TIMES + 1)).
 
 Type: natural number
@@ -214,12 +229,15 @@ MEASURE_INTERVAL
 
 Period in milliseconds to measure data
 
+This value should be larger than UPLOAD_INTERVAL.
+
 Type: natural number
 
 ROUTER_TOPOLOGY
 ---------------
 
-Setting of LoRa message routing.
+Setting of LoRa message routing
+
 Circular routing should be avoided.
 
 Type: array of pairs of device IDs (upstream device, downstream device).

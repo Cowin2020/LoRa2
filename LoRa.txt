@@ -20,13 +20,15 @@ Data type and constants
 		1 byte hour
 		1 byte minute
 		1 byte second
-	Values (7-27 bytes, binary format)
+	Values (7-35 bytes, binary format)
 		7 bytes time
+		4 bytes float battery voltage if ENABLE_BATTERY_GAUGE
+		4 bytes float battery percentage if ENABLE_BATTERY_GAUGE
 		4 bytes float temperature from Dallas thermometer if ENABLE_DALLAS
-		4 bytes float temperature from BME280 if ENABLE_BME
-		4 bytes float pressure from BME280 if ENABLE_BME
-		4 bytes float humidity from BME280 if ENABLE_BME
-		4 bytes float ultraviolet LTR390 sensor if ENABLE_LTR
+		4 bytes float temperature from BME280 if ENABLE_BME280
+		4 bytes float pressure from BME280 if ENABLE_BME280
+		4 bytes float humidity from BME280 if ENABLE_BME280
+		4 bytes float ultraviolet LTR390 sensor if ENABLE_LTR390
 
 Protocol of time synchronization
 --------------------------------

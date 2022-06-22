@@ -16,26 +16,21 @@ LoRa sender and receiver
 #define BATTERY_GAUGE_LC709203F 2
 
 /* Features */
+//	#define ENABLE_LED
+//	#define ENABLE_COM_OUTPUT
+//	#define ENABLE_OLED_OUTPUT
+//	#define ENABLE_CLOCK CLOCK_DS3231
+//	#define ENABLE_SD_CARD
 //	#define ENABLE_SLEEP
-#define ENABLE_LED
-#define ENABLE_COM_OUTPUT
-#define ENABLE_OLED_OUTPUT
-#define ENABLE_CLOCK CLOCK_DS3231
-#define ENABLE_SD_CARD
-#define ENABLE_BATTERY_GAUGE BATTERY_GAUGE_DFROBOT
-#define ENABLE_DALLAS
-#define ENABLE_BME
-#define ENABLE_LTR
+//	#define ENABLE_BATTERY_GAUGE BATTERY_GAUGE_DFROBOT
+//	#define ENABLE_DALLAS
+//	#define ENABLE_BME280
+//	#define ENABLE_LTR390
 
 /* Software Parameters */
 #define WIFI_SSID "SSID"
 #define WIFI_PASS "PASSWORD"
-#define HTTP_UPLOAD_FORMAT \
-	"http://www.example.com/upload?device=%1$u&serial=%2$u&time=%3$s" \
-	"&battery_voltage=%4$F&battery_percentage=%5$F" \
-	"&dallas=%6$F" \
-	"&temperature=%7$F&pressure=%8$F&humidity=%9$F" \
-	"&ultraviolet=%10$F"
+#define HTTP_UPLOAD_FORMAT "http://www.example.com/upload?device=%1$u&serial=%2$u&time=%3$s"
 #define HTTP_UPLOAD_LENGTH 256
 #define HTTP_AUTHORIZATION_TYPE ""
 #define HTTP_AUTHORIZATION_CODE ""
@@ -570,12 +565,12 @@ struct [[gnu::packed]] Data {
 	#ifdef ENABLE_DALLAS
 		float dallas_temperature;
 	#endif
-	#ifdef ENABLE_BME
+	#ifdef ENABLE_BME280
 		float bme_temperature;
 		float bme_pressure;
 		float bme_humidity;
 	#endif
-	#ifdef ENABLE_LTR
+	#ifdef ENABLE_LTR390
 		float ltr_ultraviolet;
 	#endif
 };
@@ -611,14 +606,14 @@ static bool setup_error;
 		static class DallasTemperature dallas(&onewire_thermometer);
 	#endif
 
-	#ifdef ENABLE_BME
+	#ifdef ENABLE_BME280
 		#include <Adafruit_Sensor.h>
 		#include <Adafruit_BME280.h>
 
 		static class Adafruit_BME280 BME;
 	#endif
 
-	#ifdef ENABLE_LTR
+	#ifdef ENABLE_LTR390
 		#include <Adafruit_LTR390.h>
 
 		static class Adafruit_LTR390 LTR;
@@ -795,13 +790,13 @@ static bool setup_error;
 			#ifdef ENABLE_DALLAS
 				print->printf(",%f\n", data->dallas_temperature);
 			#endif
-			#ifdef ENABLE_BME
+			#ifdef ENABLE_BME280
 				print->printf(
 					",%f,%f,%f",
 					data->bme_temperature, data->bme_pressure, data->bme_humidity
 				);
 			#endif
-			#ifdef ENABLE_LTR
+			#ifdef ENABLE_LTR390
 				print->printf(",%f", data->ltr_ultraviolet);
 			#endif
 			print->write('\n');
@@ -811,7 +806,7 @@ static bool setup_error;
 			/* Time */
 			{
 				class String const s = stream->readStringUntil(
-					#if defined(ENABLE_DALLAS) || defined(ENABLE_BME) || defined(ENABLE_LTR)
+					#if defined(ENABLE_DALLAS) || defined(ENABLE_BME280) || defined(ENABLE_LTR390)
 						','
 					#else
 						'\n'
@@ -830,7 +825,7 @@ static bool setup_error;
 			#ifdef ENABLE_DALLAS
 				{
 					class String const s = stream->readStringUntil(
-						#if defined(ENABLE_BME) || defined(ENABLE_LTR)
+						#if defined(ENABLE_BME280) || defined(ENABLE_LTR390)
 							','
 						#else
 							'\n'
@@ -840,7 +835,7 @@ static bool setup_error;
 				}
 			#endif
 			/* BME280 sensor */
-			#ifdef ENABLE_BME
+			#ifdef ENABLE_BME280
 				{
 					class String const s = stream->readStringUntil(',');
 					if (sscanf(s.c_str(), "%f", &data->bme_temperature) != 1) return false;
@@ -851,7 +846,7 @@ static bool setup_error;
 				}
 				{
 					class String const s = stream->readStringUntil(
-						#if defined(ENABLE_LTR)
+						#if defined(ENABLE_LTR390)
 							','
 						#else
 							'\n'
@@ -861,7 +856,7 @@ static bool setup_error;
 				}
 			#endif
 			/* LTR390 sensor */
-			#ifdef ENABLE_LTR
+			#ifdef ENABLE_LTR390
 				{
 					class String const s = stream->readStringUntil('\n');
 					if (sscanf(s.c_str(), "%f", &data->ltr_ultraviolet) != 1) return false;
@@ -1025,7 +1020,7 @@ static bool setup_error;
 				any_print("Dallas temp.: ");
 				any_println(data.dallas_temperature);
 			#endif
-			#ifdef ENABLE_BME
+			#ifdef ENABLE_BME280
 				data.bme_temperature = BME.readTemperature();
 				data.bme_pressure = BME.readPressure();
 				data.bme_humidity = BME.readHumidity();
@@ -1036,7 +1031,7 @@ static bool setup_error;
 				any_print("BME humidity: ");
 				any_println(data.bme_humidity);
 			#endif
-			#ifdef ENABLE_LTR
+			#ifdef ENABLE_LTR390
 				data.ltr_ultraviolet = LTR.readUVS();
 				any_print("LTR UV: ");
 				any_println(data.ltr_ultraviolet);
@@ -1104,7 +1099,7 @@ static bool setup_error;
 		#endif
 
 		/* Initialize BME280 sensor */
-		#ifdef ENABLE_BME
+		#ifdef ENABLE_BME280
 			if (!setup_error) {
 				if (BME.begin()) {
 					any_println("BME280 sensor found");
@@ -1116,7 +1111,7 @@ static bool setup_error;
 		#endif
 
 		/* Initial LTR390 sensor */
-		#ifdef ENABLE_LTR
+		#ifdef ENABLE_LTR390
 			if (!setup_error) {
 				if (LTR.begin()) {
 					LTR.setMode(LTR390_MODE_UVS);
@@ -1415,12 +1410,12 @@ static bool setup_error;
 			#ifdef ENABLE_DALLAS
 				, data->dallas_temperature
 			#endif
-			#ifdef ENABLE_BME
+			#ifdef ENABLE_BME280
 				, data->bme_temperature
 				, data->bme_pressure
 				, data->bme_humidity
 			#endif
-			#ifdef ENABLE_LTR
+			#ifdef ENABLE_LTR390
 				, data->ltr_ultraviolet
 			#endif
 		);
@@ -1560,7 +1555,7 @@ static bool setup_error;
 					OLED_print("Dallas temp.: ");
 					OLED_println(data.dallas_temperature);
 				#endif
-				#ifdef ENABLE_BME
+				#ifdef ENABLE_BME280
 					OLED_print("BME temp.: ");
 					OLED_println(data.bme_temperature);
 					OLED_print("BME pressure: ");
@@ -1568,7 +1563,7 @@ static bool setup_error;
 					OLED_print("BME humidity: ");
 					OLED_println(data.bme_humidity);
 				#endif
-				#ifdef ENABLE_LTR
+				#ifdef ENABLE_LTR390
 					OLED_print("LTR UV: ");
 					OLED_println(data.ltr_ultraviolet);
 				#endif
