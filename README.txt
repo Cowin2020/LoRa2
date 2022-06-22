@@ -257,12 +257,26 @@ The topology will be:
 Device 1 sends data through device 2 or directly sends to device 0 (gateway device).
 Device 4 only sends data through device 2, and device 3 only send through device 4.
 
-DALLAS_PIN
-----------
+SLEEP_MARGIN
+------------
 
-Pin number of thermometer data wire
+Number of milliseconds to wake up before measuring or sending data
 
 Type: natural number
+
+CPU_FREQUENCY
+-------------
+
+Change CPU frequency to given value
+
+Type: undefined or 240 or 160 or 80 or 40 or 20
+
+COM_BAUD
+--------
+
+Bit rate of USB serial port
+
+Type: positive number
 
 OLED_WIDTH and OLED_HEIGHT
 --------------------------
@@ -271,12 +285,12 @@ The dimension of OLED display
 
 Type: positive numbers
 
-COM_BAUD
---------
+DALLAS_PIN
+----------
 
-Bit rate of USB serial port
+Pin number of thermometer data wire
 
-Type: positive number
+Type: natural number
 
 LORA_BAND
 ---------

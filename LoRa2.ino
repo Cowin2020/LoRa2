@@ -47,12 +47,12 @@ LoRa sender and receiver
 #define SLEEP_MARGIN 1000 /* milliseconds */
 
 /* Hardware Parameters */
+//	#define CPU_FREQUENCY 80
 #define COM_BAUD 115200
 #define OLED_WIDTH 128
 #define OLED_HEIGHT 64
 #define OLED_I2C_ADDR 0x3C
 #define DALLAS_PIN 3
-#define LORA_PIN_RST 23  /* TTGO LoRa32 V2.1-1.6 version ? */
 #define LORA_BAND 868000000
 
 /* For Debug */
@@ -111,6 +111,18 @@ static char const data_file_path[] PROGMEM = DATA_FILE_PATH;
 static char const cleanup_file_path[] PROGMEM = CLEANUP_FILE_PATH;
 
 #ifdef ENABLE_COM_OUTPUT
+	inline static void Serial_initialize(void) {
+		#ifdef CPU_FREQUENCY
+			#if CPU_FREQUENCY < 80
+				Serial.begin(COM_BAUD * 80 / CPU_FREQUENCY);
+			#else
+				Serial.begin(COM_BAUD);
+			#endif
+		#else
+			Serial.begin(COM_BAUD);
+		#endif
+	}
+
 	template <typename TYPE>
 	inline void Serial_print(TYPE const x) {
 		Serial.print(x);
@@ -126,6 +138,10 @@ static char const cleanup_file_path[] PROGMEM = CLEANUP_FILE_PATH;
 		Serial.println(x, option);
 	}
 #else
+	inline static void Serial_initialize(void) {
+		Serial.end();
+	}
+
 	template <typename TYPE> inline void Serial_print(TYPE x) {}
 	template <typename TYPE> inline void Serial_println(TYPE x) {}
 	template <typename TYPE> inline void Serial_print(TYPE x, int option) {}
@@ -1066,6 +1082,11 @@ static bool setup_error;
 		#endif
 		RNG.begin("LoRa-2");
 
+		/* adjust CPU frequency */
+		#ifdef CPU_FREQUENCY
+			setCpuFrequencyMhz(CPU_FREQUENCY);
+		#endif
+
 		/* initialize LED */
 		LED_initialize();
 
@@ -1330,8 +1351,6 @@ static bool setup_error;
 			}
 			sleep_time -= SLEEP_MARGIN; /* margin time for recovering from sleep mode */
 			if (sleep_time > 0) {
-				Serial.print("Sleep: ");
-				Serial.println(sleep_time);
 				esp_sleep_enable_timer_wakeup(1000 * (sleep_time));
 				esp_light_sleep_start();
 			}
