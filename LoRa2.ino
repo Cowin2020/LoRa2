@@ -682,7 +682,70 @@ static bool setup_error;
 	static off_t wait_position;
 	Device last_receiver;
 
-	static class Resend : public Schedule {
+	#ifdef ENABLE_SLEEP
+		class Sleeper : public Schedule {
+		private:
+			static bool need_sleep;
+			static Time wake_time;
+		protected:
+			void perpare_wake(Time now);
+		public:
+			Sleeper(Time initial_period);
+			void start(Time now, Time addition_period = 0);
+			virtual void run(Time now) override;
+			static void awake(void);
+			static void sleep(Time now);
+		};
+
+		bool Sleeper::need_sleep;
+		Time Sleeper::wake_time;
+
+		inline Sleeper::Sleeper(Time const initial_period) : Schedule(initial_period) {}
+
+		void Sleeper::perpare_wake(Time const now) {
+			Time const time = head + period + margin;
+			if (need_sleep) {
+				if (time - now < wake_time - now)
+					wake_time = time;
+			} else {
+				need_sleep = true;
+				wake_time = time;
+			}
+		}
+
+		inline void Sleeper::start(Time const now, Time const addition_period) {
+			Schedule::start(now, addition_period);
+			perpare_wake(now);
+		}
+
+		void Sleeper::run(Time const now) {
+			Schedule::run(now);
+			perpare_wake(now);
+		}
+
+		void Sleeper::awake(void) {
+			need_sleep = false;
+		}
+
+		void Sleeper::sleep(Time const now) {
+			LoRa.sleep();
+			esp_sleep_enable_timer_wakeup(1000 * (wake_time - now));
+			esp_light_sleep_start();
+			need_sleep = false;
+		}
+	#else
+		class Sleeper : public Schedule {
+		public:
+			Sleeper(Time initial_period);
+			static void awake(void);
+			static void sleep(void);
+		};
+		inline Sleeper::Sleeper(Time const initial_period) : Schedule(initial_period) {}
+		inline void Sleeper::awake(void) {}
+		inline void Sleeper::sleep(Time const now) {}
+	#endif
+
+	static class Resend : public Sleeper {
 	protected:
 		unsigned int retry;
 		Device receiver;
@@ -698,7 +761,7 @@ static bool setup_error;
 		bool stop_ack(SerialNumber const serial);
 	} resend_schedule;
 
-	Resend::Resend(void) : Schedule(ACK_TIMEOUT) {
+	Resend::Resend(void) : Sleeper(ACK_TIMEOUT) {
 		size_t const N = sizeof router_topology / sizeof *router_topology;
 		size_t i = 0;
 		for (size_t i = 0;; ++i) {
@@ -751,13 +814,13 @@ static bool setup_error;
 
 	void Resend::start(Time const now) {
 		if (!RESEND_TIMES) return;
-		uint8_t margin;
-		RNG.rand(&margin, sizeof margin);
-		Schedule::start(now, margin & 0xFF);
+		uint8_t addition_period;
+		RNG.rand(&addition_period, sizeof addition_period);
+		Sleeper::start(now, addition_period & 0xFF);
 	}
 
 	void Resend::run(Time const now) {
-		Schedule::run(now);
+		Sleeper::run(now);
 		if (retry) {
 			--retry;
 			send_SEND();
@@ -947,124 +1010,129 @@ static bool setup_error;
 			}
 		}
 
-		static class Upload : public Schedule {
+		static class Upload : public Sleeper {
 		protected:
 			off_t position;
 		public:
-			inline Upload(void) : Schedule(UPLOAD_INTERVAL), position(0) {}
-			void start(Time const now) {
-				Schedule::start(now);
-			}
-			virtual void run(Time const now) {
-				Schedule::run(now);
-				File data_file = SD.open(DATA_FILE_PATH, "r");
-				if (!data_file) {
-					Serial_println("Upload: fail to open data file");
-					return;
-				}
-				if (!data_file.seek(position)) {
-					Serial_print("Upload: cannot seek: ");
-					Serial_println(position);
-					data_file.close();
-					return;
-				}
-				for (;;) {
-					class String const s = data_file.readStringUntil(',');
-					if (!s.length()) break;
-					bool const sent = s != "0";
-					struct Data data;
-					if (!readln_Data(&data, &data_file)) {
-						Serial_println("Upload: invalid data");
-						break;
-					}
-
-					if (!sent) {
-						wait_position = position;
-						position = data_file.position();
-						LORA::send_data(&data);
-						break;
-					}
-
-					position = data_file.position();
-				}
-				data_file.close();
-			}
+			Upload(void);
+			virtual void run(Time const now);
 		} upload_schedule;
+
+		inline Upload::Upload(void) : Sleeper(UPLOAD_INTERVAL), position(0) {}
+
+		void Upload::run(Time const now) {
+			Sleeper::run(now);
+			File data_file = SD.open(DATA_FILE_PATH, "r");
+			if (!data_file) {
+				Serial_println("Upload: fail to open data file");
+				return;
+			}
+			if (!data_file.seek(position)) {
+				Serial_print("Upload: cannot seek: ");
+				Serial_println(position);
+				data_file.close();
+				return;
+			}
+			for (;;) {
+				class String const s = data_file.readStringUntil(',');
+				if (!s.length()) break;
+				bool const sent = s != "0";
+				struct Data data;
+				if (!readln_Data(&data, &data_file)) {
+					Serial_println("Upload: invalid data");
+					break;
+				}
+
+				if (!sent) {
+					wait_position = position;
+					position = data_file.position();
+					LORA::send_data(&data);
+					break;
+				}
+
+				position = data_file.position();
+			}
+			data_file.close();
+		}
 	#endif
 
-	static class Measure : public Schedule {
+	static class Measure : public Sleeper {
 	public:
-		inline Measure(void) : Schedule(MEASURE_INTERVAL) {}
-		virtual void run(Time const now) {
-			Schedule::run(now);
-			if (!RTC::ready()) return;
-
-			OLED_home();
-			struct Data data;
-			data.time = RTC::now();
-			#ifdef ENABLE_COM_OUTPUT
-				Serial.print("Time: ");
-				Serial.printf(
-					"%04u-%02u-%02uT%02u:%02u:%02uZ\n",
-					data.time.year, data.time.month, data.time.day,
-					data.time.hour, data.time.minute, data.time.second
-				);
-			#endif
-			#ifdef ENABLE_OLED_OUTPUT
-				OLED.printf(
-					"%04u-%02u-%02uT%02u:%02u:%02uZ\n",
-					data.time.year, data.time.month, data.time.day,
-					data.time.hour, data.time.minute, data.time.second
-				);
-			#endif
-			#ifdef ENABLE_BATTERY_GAUGE
-				#if ENABLE_BATTERY_GAUGE == BATTERY_GAUGE_DFROBOT
-					data.battery_voltage = battery.readVoltage() / 1000;
-					data.battery_percentage = battery.readPercentage();
-				#elif ENABLE_BATTERY_GAUGE == BATTERY_GAUGE_LC709203F
-					data.battery_voltage = battery.cellVoltage();
-					data.battery_percentage = battery.cellPercent();
-				#endif
-				any_print("Battery ");
-				any_print(data.battery_voltage);
-				any_print("V ");
-				any_print(data.battery_percentage);
-				any_println("%");
-			#endif
-			#ifdef ENABLE_DALLAS
-				data.dallas_temperature = dallas.getTempCByIndex(0);
-				any_print("Dallas temp.: ");
-				any_println(data.dallas_temperature);
-			#endif
-			#ifdef ENABLE_BME280
-				data.bme_temperature = BME.readTemperature();
-				data.bme_pressure = BME.readPressure();
-				data.bme_humidity = BME.readHumidity();
-				any_print("BME temp.: ");
-				any_println(data.bme_temperature);
-				any_print("BME pressure: ");
-				any_println(data.bme_pressure, 0);
-				any_print("BME humidity: ");
-				any_println(data.bme_humidity);
-			#endif
-			#ifdef ENABLE_LTR390
-				data.ltr_ultraviolet = LTR.readUVS();
-				any_print("LTR UV: ");
-				any_println(data.ltr_ultraviolet);
-			#endif
-
-			#ifdef ENABLE_OLED_OUTPUT
-				OLED_println(OLED_message);
-				OLED_message = "";
-			#endif
-			#ifdef ENABLE_SD_CARD
-				append_data_file(&data);
-			#else
-				LORA::send_data(&data);
-			#endif
-			OLED_display();
-		}
+		Measure(void);
+		virtual void run(Time const now);
 	} measure_schedule;
+
+	inline Measure::Measure(void) : Sleeper(MEASURE_INTERVAL) {}
+
+	void Measure::run(Time const now) {
+		Sleeper::run(now);
+		if (!RTC::ready()) return;
+
+		OLED_home();
+		struct Data data;
+		data.time = RTC::now();
+		#ifdef ENABLE_COM_OUTPUT
+			Serial.print("Time: ");
+			Serial.printf(
+				"%04u-%02u-%02uT%02u:%02u:%02uZ\n",
+				data.time.year, data.time.month, data.time.day,
+				data.time.hour, data.time.minute, data.time.second
+			);
+		#endif
+		#ifdef ENABLE_OLED_OUTPUT
+			OLED.printf(
+				"%04u-%02u-%02uT%02u:%02u:%02uZ\n",
+				data.time.year, data.time.month, data.time.day,
+				data.time.hour, data.time.minute, data.time.second
+			);
+		#endif
+		#ifdef ENABLE_BATTERY_GAUGE
+			#if ENABLE_BATTERY_GAUGE == BATTERY_GAUGE_DFROBOT
+				data.battery_voltage = battery.readVoltage() / 1000;
+				data.battery_percentage = battery.readPercentage();
+			#elif ENABLE_BATTERY_GAUGE == BATTERY_GAUGE_LC709203F
+				data.battery_voltage = battery.cellVoltage();
+				data.battery_percentage = battery.cellPercent();
+			#endif
+			any_print("Battery ");
+			any_print(data.battery_voltage);
+			any_print("V ");
+			any_print(data.battery_percentage);
+			any_println("%");
+		#endif
+		#ifdef ENABLE_DALLAS
+			data.dallas_temperature = dallas.getTempCByIndex(0);
+			any_print("Dallas temp.: ");
+			any_println(data.dallas_temperature);
+		#endif
+		#ifdef ENABLE_BME280
+			data.bme_temperature = BME.readTemperature();
+			data.bme_pressure = BME.readPressure();
+			data.bme_humidity = BME.readHumidity();
+			any_print("BME temp.: ");
+			any_println(data.bme_temperature);
+			any_print("BME pressure: ");
+			any_println(data.bme_pressure, 0);
+			any_print("BME humidity: ");
+			any_println(data.bme_humidity);
+		#endif
+		#ifdef ENABLE_LTR390
+			data.ltr_ultraviolet = LTR.readUVS();
+			any_print("LTR UV: ");
+			any_println(data.ltr_ultraviolet);
+		#endif
+
+		#ifdef ENABLE_OLED_OUTPUT
+			OLED_println(OLED_message);
+			OLED_message = "";
+		#endif
+		#ifdef ENABLE_SD_CARD
+			append_data_file(&data);
+		#else
+			LORA::send_data(&data);
+		#endif
+		OLED_display();
+	}
 
 	void setup() {
 		/* initialize internal states */
@@ -1342,19 +1410,7 @@ static bool setup_error;
 		schedules.tick();
 		RNG.loop();
 
-		#ifdef ENABLE_SLEEP
-			Time const now = millis();
-			signed long int sleep_time = measure_schedule.next_tick(now);
-			if (!resend_schedule.enabled()) {
-				Time const resend_time = resend_schedule.next_tick(now);
-				if (sleep_time > resend_time) sleep_time = resend_time;
-			}
-			sleep_time -= SLEEP_MARGIN; /* margin time for recovering from sleep mode */
-			if (sleep_time > 0) {
-				esp_sleep_enable_timer_wakeup(1000 * (sleep_time));
-				esp_light_sleep_start();
-			}
-		#endif
+		Sleeper::sleep(millis());
 	}
 
 #elif DEVICE_TYPE == DEVICE_RECEIVER /* ************************************* */
@@ -1613,19 +1669,23 @@ static bool setup_error;
 
 	static class Synchronize : public Schedule {
 	public:
-		Synchronize(void) : Schedule(SYNCHONIZE_INTERVAL) {}
-		virtual void run(Time const now) {
-			Schedule::run(now);
-			if (!RTC::ready()) return;
-			struct FullTime const payload = RTC::now();
-
-			LoRa.beginPacket();
-			LoRa.write(PacketType(PACKET_TIME));
-			LoRa.write(Device(0));
-			LORA::send_payload("TIME", &payload, sizeof payload);
-			LoRa.endPacket(true);
-		}
+		Synchronize(void);
+		virtual void run(Time const now);
 	} synchronize_schedule;
+
+	inline Synchronize::Synchronize(void) : Schedule(SYNCHONIZE_INTERVAL) {}
+
+	void Synchronize::run(Time const now) {
+		Schedule::run(now);
+		if (!RTC::ready()) return;
+		struct FullTime const payload = RTC::now();
+
+		LoRa.beginPacket();
+		LoRa.write(PacketType(PACKET_TIME));
+		LoRa.write(Device(0));
+		LORA::send_payload("TIME", &payload, sizeof payload);
+		LoRa.endPacket(true);
+	}
 
 	void setup() {
 		/* initialize internal states */
