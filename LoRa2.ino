@@ -582,12 +582,12 @@ struct [[gnu::packed]] Data {
 		float dallas_temperature;
 	#endif
 	#ifdef ENABLE_BME280
-		float bme_temperature;
-		float bme_pressure;
-		float bme_humidity;
+		float bme280_temperature;
+		float bme280_pressure;
+		float bme280_humidity;
 	#endif
 	#ifdef ENABLE_LTR390
-		float ltr_ultraviolet;
+		float ltr390_ultraviolet;
 	#endif
 };
 
@@ -872,11 +872,11 @@ static bool setup_error;
 			#ifdef ENABLE_BME280
 				print->printf(
 					",%f,%f,%f",
-					data->bme_temperature, data->bme_pressure, data->bme_humidity
+					data->bme280_temperature, data->bme280_pressure, data->bme280_humidity
 				);
 			#endif
 			#ifdef ENABLE_LTR390
-				print->printf(",%f", data->ltr_ultraviolet);
+				print->printf(",%f", data->ltr390_ultraviolet);
 			#endif
 			print->write('\n');
 		}
@@ -917,11 +917,11 @@ static bool setup_error;
 			#ifdef ENABLE_BME280
 				{
 					class String const s = stream->readStringUntil(',');
-					if (sscanf(s.c_str(), "%f", &data->bme_temperature) != 1) return false;
+					if (sscanf(s.c_str(), "%f", &data->bme280_temperature) != 1) return false;
 				}
 				{
 					class String const s = stream->readStringUntil(',');
-					if (sscanf(s.c_str(), "%f", &data->bme_pressure) != 1) return false;
+					if (sscanf(s.c_str(), "%f", &data->bme280_pressure) != 1) return false;
 				}
 				{
 					class String const s = stream->readStringUntil(
@@ -931,14 +931,14 @@ static bool setup_error;
 							'\n'
 						#endif
 					);
-					if (sscanf(s.c_str(), "%f", &data->bme_humidity) != 1) return false;
+					if (sscanf(s.c_str(), "%f", &data->bme280_humidity) != 1) return false;
 				}
 			#endif
 			/* LTR390 sensor */
 			#ifdef ENABLE_LTR390
 				{
 					class String const s = stream->readStringUntil('\n');
-					if (sscanf(s.c_str(), "%f", &data->ltr_ultraviolet) != 1) return false;
+					if (sscanf(s.c_str(), "%f", &data->ltr390_ultraviolet) != 1) return false;
 				}
 			#endif
 			return true;
@@ -1106,20 +1106,20 @@ static bool setup_error;
 			any_println(data.dallas_temperature);
 		#endif
 		#ifdef ENABLE_BME280
-			data.bme_temperature = BME.readTemperature();
-			data.bme_pressure = BME.readPressure();
-			data.bme_humidity = BME.readHumidity();
+			data.bme280_temperature = BME.readTemperature();
+			data.bme280_pressure = BME.readPressure();
+			data.bme280_humidity = BME.readHumidity();
 			any_print("BME temp.: ");
-			any_println(data.bme_temperature);
+			any_println(data.bme280_temperature);
 			any_print("BME pressure: ");
-			any_println(data.bme_pressure, 0);
+			any_println(data.bme280_pressure, 0);
 			any_print("BME humidity: ");
-			any_println(data.bme_humidity);
+			any_println(data.bme280_humidity);
 		#endif
 		#ifdef ENABLE_LTR390
-			data.ltr_ultraviolet = LTR.readUVS();
+			data.ltr390_ultraviolet = LTR.readUVS();
 			any_print("LTR UV: ");
-			any_println(data.ltr_ultraviolet);
+			any_println(data.ltr390_ultraviolet);
 		#endif
 
 		#ifdef ENABLE_OLED_OUTPUT
@@ -1486,12 +1486,12 @@ static bool setup_error;
 				, data->dallas_temperature
 			#endif
 			#ifdef ENABLE_BME280
-				, data->bme_temperature
-				, data->bme_pressure
-				, data->bme_humidity
+				, data->bme280_temperature
+				, data->bme280_pressure
+				, data->bme280_humidity
 			#endif
 			#ifdef ENABLE_LTR390
-				, data->ltr_ultraviolet
+				, data->ltr390_ultraviolet
 			#endif
 		);
 		Serial_print("Upload to ");
@@ -1632,15 +1632,15 @@ static bool setup_error;
 				#endif
 				#ifdef ENABLE_BME280
 					OLED_print("BME temp.: ");
-					OLED_println(data.bme_temperature);
+					OLED_println(data.bme280_temperature);
 					OLED_print("BME pressure: ");
-					OLED_println(data.bme_pressure, 0);
+					OLED_println(data.bme280_pressure, 0);
 					OLED_print("BME humidity: ");
-					OLED_println(data.bme_humidity);
+					OLED_println(data.bme280_humidity);
 				#endif
 				#ifdef ENABLE_LTR390
 					OLED_print("LTR UV: ");
-					OLED_println(data.ltr_ultraviolet);
+					OLED_println(data.ltr390_ultraviolet);
 				#endif
 				OLED_println(OLED_message);
 				OLED_message = "";
