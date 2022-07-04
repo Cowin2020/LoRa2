@@ -43,8 +43,8 @@ LoRa sender and receiver
 #define ACK_TIMEOUT 1000UL /* milliseconds */
 #define UPLOAD_INTERVAL 6000UL /* milliseconds */
 #define MEASURE_INTERVAL 60000UL /* milliseconds */ /* MUST: > UPLOAD_INTERVAL */
-#define ROUTER_TOPOLOGY {}
 #define SLEEP_MARGIN 1000 /* milliseconds */
+#define ROUTER_TOPOLOGY {}
 
 /* Hardware Parameters */
 //	#define CPU_FREQUENCY 80
@@ -389,8 +389,8 @@ public:
 	signed long int next_tick(Time now) const;
 	void start(Time now, Time addition_period = 0);
 	void stop(void);
+	virtual bool tick(Time const now);
 	virtual void run(Time now);
-	bool tick(Time const now);
 };
 
 inline Schedule::Schedule(Time const initial_period) : enable(false), head(0), period(initial_period), margin(0) {}
@@ -413,10 +413,6 @@ inline void Schedule::stop(void) {
 	enable = false;
 }
 
-inline void Schedule::run(Time const now) {
-	head = now;
-}
-
 bool Schedule::tick(Time const now) {
 	if (enable && now-head >= period+margin) {
 		run(now);
@@ -424,6 +420,10 @@ bool Schedule::tick(Time const now) {
 	} else {
 		return false;
 	}
+}
+
+void Schedule::run(Time const now) {
+	head = now;
 }
 
 class Schedules {
@@ -691,9 +691,8 @@ static bool setup_error;
 			void perpare_wake(Time now);
 		public:
 			Sleeper(Time initial_period);
-			void start(Time now, Time addition_period = 0);
+			virtual bool tick(Time const now);
 			virtual void run(Time now) override;
-			static void awake(void);
 			static void sleep(Time now);
 		};
 
@@ -713,9 +712,10 @@ static bool setup_error;
 			}
 		}
 
-		inline void Sleeper::start(Time const now, Time const addition_period) {
-			Schedule::start(now, addition_period);
+		bool Sleeper::tick(Time const now) {
+			bool r = Schedule::tick(now);
 			perpare_wake(now);
+			return r;
 		}
 
 		void Sleeper::run(Time const now) {
@@ -723,25 +723,22 @@ static bool setup_error;
 			perpare_wake(now);
 		}
 
-		void Sleeper::awake(void) {
-			need_sleep = false;
-		}
-
 		void Sleeper::sleep(Time const now) {
 			LoRa.sleep();
-			esp_sleep_enable_timer_wakeup(1000 * (wake_time - now));
-			esp_light_sleep_start();
+			Time const milliseconds = 1000 * (wake_time - now - SLEEP_MARGIN);
+			if (milliseconds < 24*60*60*1000) {
+				esp_sleep_enable_timer_wakeup(milliseconds);
+				esp_light_sleep_start();
+			}
 			need_sleep = false;
 		}
 	#else
 		class Sleeper : public Schedule {
 		public:
 			Sleeper(Time initial_period);
-			static void awake(void);
 			static void sleep(void);
 		};
 		inline Sleeper::Sleeper(Time const initial_period) : Schedule(initial_period) {}
-		inline void Sleeper::awake(void) {}
 		inline void Sleeper::sleep(Time const now) {}
 	#endif
 
@@ -1406,10 +1403,9 @@ static bool setup_error;
 			LED_flash();
 			return;
 		}
+		RNG.loop();
 		LORA::receive(LoRa.parsePacket());
 		schedules.tick();
-		RNG.loop();
-
 		Sleeper::sleep(millis());
 	}
 
