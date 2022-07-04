@@ -2,8 +2,9 @@ Data type and constants
 -----------------------
 	Type of packet (1 byte)
 		0: TIME
-		1: ACK
-		2: SEND
+		1: ASKTIME
+		2: ACK
+		3: SEND
 	Device ID (1 byte)
 		Each sender device has a unique ID.
 	Nonce (96 bits, 12 bytes)
@@ -45,6 +46,23 @@ Protocol of time synchronization
 		repeat nonce
 		repeat encrypted current time
 		repeat authentication tag
+
+Protocol of call for synchronization
+------------------------------------
+	1. Terminal:
+		type SYNCHRONIZE
+		receiver device ID (router or gateway)
+		nonce
+		encrypted
+			terminal device ID
+		authentication tag
+	2. Optional repeaters:
+		type SYNCHRONIZE
+		recerver device ID (next router or gateway)
+		nonce
+		encrypted
+			repeat terminal device ID
+		authentication tag
 
 Protocol of uploading data
 --------------------------

@@ -39,6 +39,7 @@ LoRa sender and receiver
 #define DATA_FILE_PATH "/data.csv"
 #define CLEANUP_FILE_PATH "/cleanup.csv"
 #define SYNCHONIZE_INTERVAL 7654321UL /* milliseconds */
+#define SYNCHONIZE_MARGIN 1234UL /* milliseconds */
 #define RESEND_TIMES 3
 #define ACK_TIMEOUT 1000UL /* milliseconds */
 #define UPLOAD_INTERVAL 6000UL /* milliseconds */
@@ -80,8 +81,10 @@ LoRa sender and receiver
 #endif
 
 #define PACKET_TIME 0
-#define PACKET_ACK  1
-#define PACKET_SEND 2
+#define PACKET_ASKTIME 1
+#define PACKET_ACK  2
+#define PACKET_SEND 3
+
 #define CIPHER_IV_LENGTH 12
 #define CIPHER_TAG_SIZE 4
 
@@ -744,7 +747,7 @@ static bool setup_error;
 	public:
 		Resend(void);
 		void start(Time const now);
-		virtual void run(Time const now);
+		virtual void run(Time const now) override;
 		void start_send(struct Data const *const data);
 		bool stop_ack(SerialNumber const serial);
 	} resend_schedule;
@@ -840,6 +843,42 @@ static bool setup_error;
 			return false;
 		}
 	}
+
+	#ifdef ENABLE_SLEEP
+		class AskTime : public Schedule {
+		protected:
+			bool wait_response;
+		public:
+			AskTime(void);
+			virtual void run(Time now) override;
+			void reset(void);
+		} ask_time_schedule;
+
+		inline AskTime::AskTime(void) : Schedule(SYNCHONIZE_INTERVAL), wait_response(false) {}
+
+		void AskTime::run(Time const now) {
+			Schedule::run(now);
+			if (!wait_response) {
+				wait_response = true;
+				period = SYNCHONIZE_MARGIN;
+				Sleeper::wait_synchronization = true;
+				LoRa.beginPacket();
+				LoRa.write(uint8_t(PACKET_ASKTIME));
+				LoRa.write(uint8_t(last_receiver));
+				Device const device = DEVICE_ID;
+				LORA::send_payload("ASKTIME", &device, sizeof device);
+				LoRa.endPacket(true);
+			} else {
+				reset();
+			}
+		}
+
+		void AskTime::reset(void) {
+			wait_response = false;
+			period = SYNCHONIZE_INTERVAL;
+			Sleeper::wait_synchronization = false;
+		}
+	#endif
 
 	namespace LORA {
 		static void send_data(struct Data const *const data) {
@@ -1049,7 +1088,7 @@ static bool setup_error;
 	static class Measure : public Schedule {
 	public:
 		Measure(void);
-		virtual void run(Time const now);
+		virtual void run(Time const now) override;
 	} measure_schedule;
 
 	inline Measure::Measure(void) : Schedule(MEASURE_INTERVAL) {}
@@ -1132,6 +1171,9 @@ static bool setup_error;
 			OLED_message = "";
 		#endif
 		measure_schedule.start(0);
+		#ifdef ENABLE_SLEEP
+			schedules.add(&ask_time_schedule);
+		#endif
 		schedules.add(&measure_schedule);
 		schedules.add(&resend_schedule);
 		#ifdef ENABLE_SD_CARD
@@ -1257,6 +1299,9 @@ static bool setup_error;
 				}
 			}
 
+			#ifdef ENABLE_SLEEP
+				ask_time_schedule.reset();
+			#endif
 			RTC::set(&time);
 
 			LoRa.beginPacket();
@@ -1521,7 +1566,56 @@ static bool setup_error;
 		}
 	}
 
+	static class Synchronize : public Schedule {
+	public:
+		Synchronize(void);
+		virtual void run(Time const now);
+	} synchronize_schedule;
+
+	inline Synchronize::Synchronize(void) : Schedule(SYNCHONIZE_INTERVAL) {}
+
+	void Synchronize::run(Time const now) {
+		Schedule::run(now);
+		if (!RTC::ready()) return;
+		struct FullTime const payload = RTC::now();
+
+		LoRa.beginPacket();
+		LoRa.write(PacketType(PACKET_TIME));
+		LoRa.write(Device(0));
+		LORA::send_payload("TIME", &payload, sizeof payload);
+		LoRa.endPacket(true);
+	}
+
 	namespace LORA {
+		static void receive_ASKTIME(signed int const packet_size) {
+			size_t const overhead_size =
+				sizeof (PacketType) + /* packet type */
+				sizeof (Device) +     /* receiver */
+				CIPHER_IV_LENGTH +    /* nonce */
+				CIPHER_TAG_SIZE;      /* cipher tag */
+			size_t const expected_packet_size =
+				overhead_size +
+				sizeof (Device);      /* terminal */
+			if (packet_size != expected_packet_size) {
+				Serial_print("LoRa ASKTIME: incorrect packet size: ");
+				Serial_println(packet_size);
+				return;
+			}
+			Device receiver;
+			if (LoRa.readBytes(&receiver, sizeof receiver) != sizeof receiver) return;
+			if (receiver != (Device)0) return;
+
+			Device device;
+			if (!LORA::receive_payload("ASKTIME", &device, sizeof device)) return;
+			if (!(device > 0 && device <= NUMBER_OF_SENDERS)) {
+				Serial_print("LoRa ASKTIME: incorrect device: ");
+				Serial_println(device);
+				return;
+			}
+
+			synchronize_schedule.run(millis());
+		}
+
 		static void receive_SEND(signed int const packet_size) {
 			size_t const overhead_size =
 				sizeof (PacketType) +   /* packet type */
@@ -1541,7 +1635,7 @@ static bool setup_error;
 			}
 			Device receiver;
 			if (LoRa.readBytes(&receiver, sizeof receiver) != sizeof receiver) return;
-			if (receiver != Device(0)) return;
+			if (receiver != (Device)0) return;
 			size_t const payload_size = packet_size - overhead_size;
 			unsigned char payload[payload_size];
 			if (!LORA::receive_payload("SEND", &payload, sizeof payload)) return;
@@ -1641,6 +1735,8 @@ static bool setup_error;
 			Device packet_type;
 			if (LoRa.readBytes(&packet_type, sizeof packet_type) != sizeof packet_type) return;
 			switch (packet_type) {
+			case PACKET_ASKTIME:
+				receive_ASKTIME(packet_size);
 			case PACKET_SEND:
 				receive_SEND(packet_size);
 				break;
@@ -1653,26 +1749,6 @@ static bool setup_error;
 			unsigned long int const microseconds = micros();
 			RNG.stir((uint8_t const *)&microseconds, sizeof microseconds, 8);
 		}
-	}
-
-	static class Synchronize : public Schedule {
-	public:
-		Synchronize(void);
-		virtual void run(Time const now);
-	} synchronize_schedule;
-
-	inline Synchronize::Synchronize(void) : Schedule(SYNCHONIZE_INTERVAL) {}
-
-	void Synchronize::run(Time const now) {
-		Schedule::run(now);
-		if (!RTC::ready()) return;
-		struct FullTime const payload = RTC::now();
-
-		LoRa.beginPacket();
-		LoRa.write(PacketType(PACKET_TIME));
-		LoRa.write(Device(0));
-		LORA::send_payload("TIME", &payload, sizeof payload);
-		LoRa.endPacket(true);
 	}
 
 	void setup() {
