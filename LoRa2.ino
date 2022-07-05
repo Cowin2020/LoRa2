@@ -377,6 +377,58 @@ static class String String_from_FullTime(struct FullTime const *const fulltime) 
 	#endif
 #endif
 
+#ifdef ENABLE_SLEEP
+	class Sleeper {
+	protected:
+		static Time const MAXIMUM_LENGTH;
+		static bool enabled;
+		static Time wake_time;
+	public:
+		static bool wait_synchronization;
+		Sleeper(void);
+		void alarm(Time now, Time wake);
+		void sleep(void);
+	} sleeper;
+
+	Time const Sleeper::MAXIMUM_LENGTH = 24 * 60 * 60 * 1000; /* milliseconds */
+	bool Sleeper::enabled = false;
+	Time Sleeper::wake_time = 0;
+	bool Sleeper::wait_synchronization = false;
+
+	inline Sleeper::Sleeper(void) {}
+
+	inline void Sleeper::alarm(Time const now, Time const wake) {
+		if (enabled) {
+			Time const period_0 = wake_time - now;
+			Time const period_1 = wake - now;
+			if (period_0 <= 0 ||  MAXIMUM_LENGTH <= period_0) return;
+			if (0 < period_1 && period_1 < MAXIMUM_LENGTH || period_0 <= period_1) return;
+		}
+		enabled = true;
+		wake_time = wake;
+	}
+
+	void Sleeper::sleep(void) {
+		if (!enabled || wait_synchronization) return;
+		Time const now = millis();
+		LoRa.sleep();
+		Time const milliseconds = wake_time - now - SLEEP_MARGIN;
+		if (milliseconds < MAXIMUM_LENGTH) {
+			esp_sleep_enable_timer_wakeup(1000 * milliseconds);
+			esp_light_sleep_start();
+		}
+		enabled = false;
+	}
+#else
+	class Sleeper {
+	public:
+		Sleeper(void);
+		void alarm(Time now, Time wake);
+	} sleeper;
+	inline Sleeper::Sleeper(void) {}
+	inline Sleeper::alarm(Time const now, Time const wake) {}
+#endif
+
 class Schedule {
 protected:
 	bool enable;
@@ -386,10 +438,10 @@ protected:
 public:
 	Schedule(Time initial_period);
 	bool enabled(void) const;
-	signed long int next_tick(Time now) const;
+	Time next_tick(Time now) const;
 	void start(Time now, Time addition_period = 0);
 	void stop(void);
-	virtual bool tick(Time const now);
+	virtual bool tick(Time now);
 	virtual void run(Time now);
 };
 
@@ -399,8 +451,8 @@ inline bool Schedule::enabled(void) const {
 	return enable;
 }
 
-inline signed long int Schedule::next_tick(Time const now) const {
-	return head + period + margin - now;
+inline Time Schedule::next_tick(Time const now) const {
+	return head + period + margin;
 }
 
 inline void Schedule::start(Time const now, Time const addition_period) {
@@ -414,12 +466,10 @@ inline void Schedule::stop(void) {
 }
 
 bool Schedule::tick(Time const now) {
-	if (enable && now-head >= period+margin) {
-		run(now);
-		return true;
-	} else {
-		return false;
-	}
+	bool const need_run = enable && now-head >= period+margin;
+	if (need_run) run(now);
+	if (enable) sleeper.alarm(now, next_tick(now));
+	return need_run;
 }
 
 void Schedule::run(Time const now) {
@@ -459,6 +509,7 @@ void Schedules::tick(void) {
 	for (class Schedule *schedule: list)
 		if (schedule->tick(now))
 			break;
+	sleeper.sleep();
 }
 
 static class Schedules schedules;
@@ -682,67 +733,7 @@ static bool setup_error;
 	static off_t wait_position;
 	Device last_receiver;
 
-	#ifdef ENABLE_SLEEP
-		class Sleeper : public Schedule {
-		private:
-			static bool need_sleep;
-			static Time wake_time;
-		protected:
-			void perpare_wake(Time now);
-		public:
-			Sleeper(Time initial_period);
-			virtual bool tick(Time const now);
-			virtual void run(Time now) override;
-			static void sleep(Time now);
-		};
-
-		bool Sleeper::need_sleep;
-		Time Sleeper::wake_time;
-
-		inline Sleeper::Sleeper(Time const initial_period) : Schedule(initial_period) {}
-
-		void Sleeper::perpare_wake(Time const now) {
-			Time const time = head + period + margin;
-			if (need_sleep) {
-				if (time - now < wake_time - now)
-					wake_time = time;
-			} else {
-				need_sleep = true;
-				wake_time = time;
-			}
-		}
-
-		bool Sleeper::tick(Time const now) {
-			bool r = Schedule::tick(now);
-			perpare_wake(now);
-			return r;
-		}
-
-		void Sleeper::run(Time const now) {
-			Schedule::run(now);
-			perpare_wake(now);
-		}
-
-		void Sleeper::sleep(Time const now) {
-			LoRa.sleep();
-			Time const milliseconds = 1000 * (wake_time - now - SLEEP_MARGIN);
-			if (milliseconds < 24*60*60*1000) {
-				esp_sleep_enable_timer_wakeup(milliseconds);
-				esp_light_sleep_start();
-			}
-			need_sleep = false;
-		}
-	#else
-		class Sleeper : public Schedule {
-		public:
-			Sleeper(Time initial_period);
-			static void sleep(void);
-		};
-		inline Sleeper::Sleeper(Time const initial_period) : Schedule(initial_period) {}
-		inline void Sleeper::sleep(Time const now) {}
-	#endif
-
-	static class Resend : public Sleeper {
+	static class Resend : public Schedule {
 	protected:
 		unsigned int retry;
 		Device receiver;
@@ -758,7 +749,7 @@ static bool setup_error;
 		bool stop_ack(SerialNumber const serial);
 	} resend_schedule;
 
-	Resend::Resend(void) : Sleeper(ACK_TIMEOUT) {
+	Resend::Resend(void) : Schedule(ACK_TIMEOUT) {
 		size_t const N = sizeof router_topology / sizeof *router_topology;
 		size_t i = 0;
 		for (size_t i = 0;; ++i) {
@@ -813,11 +804,11 @@ static bool setup_error;
 		if (!RESEND_TIMES) return;
 		uint8_t addition_period;
 		RNG.rand(&addition_period, sizeof addition_period);
-		Sleeper::start(now, addition_period & 0xFF);
+		Schedule::start(now, addition_period & 0xFF);
 	}
 
 	void Resend::run(Time const now) {
-		Sleeper::run(now);
+		Schedule::run(now);
 		if (retry) {
 			--retry;
 			send_SEND();
@@ -1007,7 +998,7 @@ static bool setup_error;
 			}
 		}
 
-		static class Upload : public Sleeper {
+		static class Upload : public Schedule {
 		protected:
 			off_t position;
 		public:
@@ -1015,10 +1006,10 @@ static bool setup_error;
 			virtual void run(Time const now);
 		} upload_schedule;
 
-		inline Upload::Upload(void) : Sleeper(UPLOAD_INTERVAL), position(0) {}
+		inline Upload::Upload(void) : Schedule(UPLOAD_INTERVAL), position(0) {}
 
 		void Upload::run(Time const now) {
-			Sleeper::run(now);
+			Schedule::run(now);
 			File data_file = SD.open(DATA_FILE_PATH, "r");
 			if (!data_file) {
 				Serial_println("Upload: fail to open data file");
@@ -1053,16 +1044,16 @@ static bool setup_error;
 		}
 	#endif
 
-	static class Measure : public Sleeper {
+	static class Measure : public Schedule {
 	public:
 		Measure(void);
 		virtual void run(Time const now);
 	} measure_schedule;
 
-	inline Measure::Measure(void) : Sleeper(MEASURE_INTERVAL) {}
+	inline Measure::Measure(void) : Schedule(MEASURE_INTERVAL) {}
 
 	void Measure::run(Time const now) {
-		Sleeper::run(now);
+		Schedule::run(now);
 		if (!RTC::ready()) return;
 
 		OLED_home();
@@ -1406,7 +1397,6 @@ static bool setup_error;
 		RNG.loop();
 		LORA::receive(LoRa.parsePacket());
 		schedules.tick();
-		Sleeper::sleep(millis());
 	}
 
 #elif DEVICE_TYPE == DEVICE_RECEIVER /* ************************************* */
