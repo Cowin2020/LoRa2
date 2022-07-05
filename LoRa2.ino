@@ -848,88 +848,90 @@ static bool setup_error;
 	}
 
 	#ifdef ENABLE_SD_CARD
-		static void writeln_Data /* FIX: stupid "feature" of Arduino IDE */ (class Print *const print, struct Data const *const data) {
-			print->printf(
-				"%04u-%02u-%02uT%02u:%02u:%02uZ",
-				data->time.year, data->time.month, data->time.day,
-				data->time.hour, data->time.minute, data->time.second
-			);
-			#ifdef ENABLE_DALLAS
-				print->printf(",%f\n", data->dallas_temperature);
-			#endif
-			#ifdef ENABLE_BME280
+		namespace IO {
+			static void writeln_Data /* FIX: stupid "feature" of Arduino IDE */ (class Print *const print, struct Data const *const data) {
 				print->printf(
-					",%f,%f,%f",
-					data->bme280_temperature, data->bme280_pressure, data->bme280_humidity
+					"%04u-%02u-%02uT%02u:%02u:%02uZ",
+					data->time.year, data->time.month, data->time.day,
+					data->time.hour, data->time.minute, data->time.second
 				);
-			#endif
-			#ifdef ENABLE_LTR390
-				print->printf(",%f", data->ltr390_ultraviolet);
-			#endif
-			print->write('\n');
-		}
-
-		static bool readln_Data /* FIX: stupid "feature" of Arduino IDE */ (struct Data *const data, class Stream *const stream) {
-			/* Time */
-			{
-				class String const s = stream->readStringUntil(
-					#if defined(ENABLE_DALLAS) || defined(ENABLE_BME280) || defined(ENABLE_LTR390)
-						','
-					#else
-						'\n'
-					#endif
-				);
-				if (
-					sscanf(
-						s.c_str(),
-						"%4hu-%2hhu-%2hhuT%2hhu:%2hhu:%2hhuZ",
-						&data->time.year, &data->time.month, &data->time.day,
-						&data->time.hour, &data->time.minute, &data->time.second
-					) != 6
-				) return false;
+				#ifdef ENABLE_DALLAS
+					print->printf(",%f\n", data->dallas_temperature);
+				#endif
+				#ifdef ENABLE_BME280
+					print->printf(
+						",%f,%f,%f",
+						data->bme280_temperature, data->bme280_pressure, data->bme280_humidity
+					);
+				#endif
+				#ifdef ENABLE_LTR390
+					print->printf(",%f", data->ltr390_ultraviolet);
+				#endif
+				print->write('\n');
 			}
-			/* Dallas Thermometer */
-			#ifdef ENABLE_DALLAS
+
+			static bool readln_Data(struct Data *const data, class Stream *const stream) {
+				/* Time */
 				{
 					class String const s = stream->readStringUntil(
-						#if defined(ENABLE_BME280) || defined(ENABLE_LTR390)
+						#if defined(ENABLE_DALLAS) || defined(ENABLE_BME280) || defined(ENABLE_LTR390)
 							','
 						#else
 							'\n'
 						#endif
 					);
-					if (sscanf(s.c_str(), "%f", &data->dallas_temperature) != 1) return false;
+					if (
+						sscanf(
+							s.c_str(),
+							"%4hu-%2hhu-%2hhuT%2hhu:%2hhu:%2hhuZ",
+							&data->time.year, &data->time.month, &data->time.day,
+							&data->time.hour, &data->time.minute, &data->time.second
+						) != 6
+					) return false;
 				}
-			#endif
-			/* BME280 sensor */
-			#ifdef ENABLE_BME280
-				{
-					class String const s = stream->readStringUntil(',');
-					if (sscanf(s.c_str(), "%f", &data->bme280_temperature) != 1) return false;
-				}
-				{
-					class String const s = stream->readStringUntil(',');
-					if (sscanf(s.c_str(), "%f", &data->bme280_pressure) != 1) return false;
-				}
-				{
-					class String const s = stream->readStringUntil(
-						#if defined(ENABLE_LTR390)
-							','
-						#else
-							'\n'
-						#endif
-					);
-					if (sscanf(s.c_str(), "%f", &data->bme280_humidity) != 1) return false;
-				}
-			#endif
-			/* LTR390 sensor */
-			#ifdef ENABLE_LTR390
-				{
-					class String const s = stream->readStringUntil('\n');
-					if (sscanf(s.c_str(), "%f", &data->ltr390_ultraviolet) != 1) return false;
-				}
-			#endif
-			return true;
+				/* Dallas Thermometer */
+				#ifdef ENABLE_DALLAS
+					{
+						class String const s = stream->readStringUntil(
+							#if defined(ENABLE_BME280) || defined(ENABLE_LTR390)
+								','
+							#else
+								'\n'
+							#endif
+						);
+						if (sscanf(s.c_str(), "%f", &data->dallas_temperature) != 1) return false;
+					}
+				#endif
+				/* BME280 sensor */
+				#ifdef ENABLE_BME280
+					{
+						class String const s = stream->readStringUntil(',');
+						if (sscanf(s.c_str(), "%f", &data->bme280_temperature) != 1) return false;
+					}
+					{
+						class String const s = stream->readStringUntil(',');
+						if (sscanf(s.c_str(), "%f", &data->bme280_pressure) != 1) return false;
+					}
+					{
+						class String const s = stream->readStringUntil(
+							#if defined(ENABLE_LTR390)
+								','
+							#else
+								'\n'
+							#endif
+						);
+						if (sscanf(s.c_str(), "%f", &data->bme280_humidity) != 1) return false;
+					}
+				#endif
+				/* LTR390 sensor */
+				#ifdef ENABLE_LTR390
+					{
+						class String const s = stream->readStringUntil('\n');
+						if (sscanf(s.c_str(), "%f", &data->ltr390_ultraviolet) != 1) return false;
+					}
+				#endif
+				return true;
+			}
 		}
 
 		static void dump_log_file(void) {
@@ -968,7 +970,7 @@ static bool setup_error;
 				bool const sent = s != "0";
 
 				struct Data data;
-				if (!readln_Data(&data, &cleanup_file)) {
+				if (!IO::readln_Data(&data, &cleanup_file)) {
 					Serial_println("Clean-up: invalid data");
 					break;
 				}
@@ -979,7 +981,7 @@ static bool setup_error;
 					#else
 						data_file.print("0,");
 					#endif
-					writeln_Data(&data_file, &data);
+					IO::writeln_Data(&data_file, &data);
 				}
 			}
 			cleanup_file.close();
@@ -993,7 +995,7 @@ static bool setup_error;
 				any_println("Cannot append data file");
 			} else {
 				file.print("0,");
-				writeln_Data(&file, data);
+				IO::writeln_Data(&file, data);
 				file.close();
 			}
 		}
@@ -1026,7 +1028,7 @@ static bool setup_error;
 				if (!s.length()) break;
 				bool const sent = s != "0";
 				struct Data data;
-				if (!readln_Data(&data, &data_file)) {
+				if (!IO::readln_Data(&data, &data_file)) {
 					Serial_println("Upload: invalid data");
 					break;
 				}
