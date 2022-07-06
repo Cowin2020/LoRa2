@@ -113,6 +113,13 @@ static char const secret_key[16] PROGMEM = SECRET_KEY;
 static char const data_file_path[] PROGMEM = DATA_FILE_PATH;
 static char const cleanup_file_path[] PROGMEM = CLEANUP_FILE_PATH;
 
+template <typename TYPE>
+uint8_t rand_int(void) {
+	TYPE x;
+	RNG.rand((uint8_t *)&x, sizeof x);
+	return x;
+}
+
 #ifdef ENABLE_COM_OUTPUT
 	inline static void Serial_initialize(void) {
 		#ifdef CPU_FREQUENCY
@@ -805,9 +812,7 @@ static bool setup_error;
 
 	void Resend::start(Time const now) {
 		if (!RESEND_TIMES) return;
-		uint8_t addition_period;
-		RNG.rand(&addition_period, sizeof addition_period);
-		Schedule::start(now, addition_period & 0xFF);
+		Schedule::start(now, rand_int<uint8_t>());
 	}
 
 	void Resend::run(Time const now) {
@@ -850,11 +855,16 @@ static bool setup_error;
 			bool wait_response;
 		public:
 			AskTime(void);
+			void start(Time const now);
 			virtual void run(Time now) override;
 			void reset(void);
 		} ask_time_schedule;
 
 		inline AskTime::AskTime(void) : Schedule(SYNCHONIZE_INTERVAL), wait_response(false) {}
+
+		void AskTime::start(Time const now) {
+			Schedule::start(now, rand_int<uint8_t>());
+		}
 
 		void AskTime::run(Time const now) {
 			Schedule::run(now);
@@ -1171,6 +1181,7 @@ static bool setup_error;
 			OLED_message = "";
 		#endif
 		measure_schedule.start(0);
+		ask_time_schedule.start(0);
 		#ifdef ENABLE_SLEEP
 			schedules.add(&ask_time_schedule);
 		#endif
