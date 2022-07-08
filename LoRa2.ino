@@ -434,9 +434,11 @@ static class String String_from_FullTime(struct FullTime const *const fulltime) 
 	public:
 		Sleeper(void);
 		void alarm(Time now, Time wake);
+		void sleep(void);
 	} sleeper;
 	inline Sleeper::Sleeper(void) {}
-	inline Sleeper::alarm(Time const now, Time const wake) {}
+	inline void Sleeper::alarm(Time const now, Time const wake) {}
+	inline void Sleeper::sleep(void) {}
 #endif
 
 class Schedule {
@@ -1181,8 +1183,8 @@ static bool setup_error;
 			OLED_message = "";
 		#endif
 		measure_schedule.start(0);
-		ask_time_schedule.start(0);
 		#ifdef ENABLE_SLEEP
+			ask_time_schedule.start(0);
 			schedules.add(&ask_time_schedule);
 		#endif
 		schedules.add(&measure_schedule);
