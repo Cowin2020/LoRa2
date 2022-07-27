@@ -390,40 +390,48 @@ static class String String_from_FullTime(struct FullTime const *const fulltime) 
 #ifdef ENABLE_SLEEP
 	class Sleeper {
 	protected:
-		static Time const MAXIMUM_LENGTH;
+		static Time const MAXIMUM_SLEEP_LENGTH;
 		static bool enabled;
 		static Time wake_time;
+		bool in_range(Time diff);
 	public:
+		static bool wait_ack;
 		static bool wait_synchronization;
 		Sleeper(void);
 		void alarm(Time now, Time wake);
 		void sleep(void);
 	} sleeper;
 
-	Time const Sleeper::MAXIMUM_LENGTH = 24 * 60 * 60 * 1000; /* milliseconds */
+	Time const Sleeper::MAXIMUM_SLEEP_LENGTH = 24 * 60 * 60 * 1000; /* milliseconds */
 	bool Sleeper::enabled = false;
 	Time Sleeper::wake_time = 0;
+	bool Sleeper::wait_ack = false;
 	bool Sleeper::wait_synchronization = false;
 
 	inline Sleeper::Sleeper(void) {}
 
-	inline void Sleeper::alarm(Time const now, Time const wake) {
+	inline bool Sleeper::in_range(Time const period) {
+		return 0 < period && period < MAXIMUM_SLEEP_LENGTH;
+	}
+
+	void Sleeper::alarm(Time const now, Time const wake) {
 		if (enabled) {
 			Time const period_0 = wake_time - now;
 			Time const period_1 = wake - now;
-			if (period_0 <= 0 ||  MAXIMUM_LENGTH <= period_0) return;
-			if (0 < period_1 && period_1 < MAXIMUM_LENGTH || period_0 <= period_1) return;
+			if (!in_range(period_0)) return;
+			if (0 < period_1 && period_1 < MAXIMUM_SLEEP_LENGTH || period_0 <= period_1) return;
+			if (!in_range(period_1) || period_0 <= period_1) return;
 		}
 		enabled = true;
 		wake_time = wake;
 	}
 
 	void Sleeper::sleep(void) {
-		if (!enabled || wait_synchronization) return;
+		if (!enabled || wait_ack || wait_synchronization) return;
 		Time const now = millis();
 		LoRa.sleep();
 		Time const milliseconds = wake_time - now - SLEEP_MARGIN;
-		if (milliseconds < MAXIMUM_LENGTH) {
+		if (milliseconds < MAXIMUM_SLEEP_LENGTH) {
 			esp_sleep_enable_timer_wakeup(1000 * milliseconds);
 			esp_light_sleep_start();
 		}
@@ -835,6 +843,7 @@ static bool setup_error;
 		this->serial = serial_current;
 		++serial_current;
 		this->data = *data;
+		Sleeper::wait_ack = true;
 		Time const now = millis();
 		start(now);
 		run(now);
@@ -842,6 +851,7 @@ static bool setup_error;
 
 	bool Resend::stop_ack(SerialNumber const serial) {
 		if (serial == this->serial) {
+			Sleeper::wait_ack = false;
 			last_receiver = receiver;
 			stop();
 			return true;
@@ -1469,47 +1479,44 @@ static bool setup_error;
 	static class WiFiUDP WiFiUDP;
 	static class NTPClient NTP(WiFiUDP, NTP_SERVER);
 
-	#ifndef ENABLE_CLOCK
-		namespace RTC {
-			inline static bool ready(void) {
-				return NTP.isTimeSet();
-			}
+	namespace RTC {
+		inline static bool ready(void) {
+			return NTP.isTimeSet();
+		}
 
-			static struct FullTime now(void) {
-				time_t const epoch = NTP.getEpochTime();
-				struct tm time;
-				gmtime_r(&epoch, &time);
-				return (struct FullTime){
-					.year = (unsigned short int)(1900U + time.tm_year),
-					.month = (unsigned char)(time.tm_mon + 1),
-					.day = (unsigned char)time.tm_mday,
-					.hour = (unsigned char)time.tm_hour,
-					.minute = (unsigned char)time.tm_min,
-					.second = (unsigned char)time.tm_sec
-				};
-			}
-			static void synchronize_NTP(void) {
-				if (WiFi.status() == WL_CONNECTED) {
-					if (NTP.update()) {
-						#ifdef ENABLE_CLOCK
-							time_t const epoch = NTP.getEpochTime();
-							struct tm time;
-							gmtime_r(&epoch, &time);
-							struct FullTime const fulltime = {
-								.year = (unsigned short int)(1900U + time.tm_year),
-								.month = (unsigned char)(time.tm_mon + 1),
-								.day = (unsigned char)time.tm_mday,
-								.hour = (unsigned char)time.tm_hour,
-								.minute = (unsigned char)time.tm_min,
-								.second = (unsigned char)time.tm_sec
-							};
-							RTC::set(&fulltime);
-						#endif
-					}
-				}
+		static struct FullTime now(void) {
+			time_t const epoch = NTP.getEpochTime();
+			struct tm time;
+			gmtime_r(&epoch, &time);
+			return (struct FullTime){
+				.year = (unsigned short int)(1900U + time.tm_year),
+				.month = (unsigned char)(time.tm_mon + 1),
+				.day = (unsigned char)time.tm_mday,
+				.hour = (unsigned char)time.tm_hour,
+				.minute = (unsigned char)time.tm_min,
+				.second = (unsigned char)time.tm_sec
+			};
+		}
+		static void synchronize_NTP(void) {
+			if (NTP.update()) {
+				Serial_println("NTP update");
+				#ifdef ENABLE_CLOCK
+					time_t const epoch = NTP.getEpochTime();
+					struct tm time;
+					gmtime_r(&epoch, &time);
+					struct FullTime const fulltime = {
+						.year = (unsigned short int)(1900U + time.tm_year),
+						.month = (unsigned char)(time.tm_mon + 1),
+						.day = (unsigned char)time.tm_mday,
+						.hour = (unsigned char)time.tm_hour,
+						.minute = (unsigned char)time.tm_min,
+						.second = (unsigned char)time.tm_sec
+					};
+					RTC::set(&fulltime);
+				#endif
 			}
 		}
-	#endif
+	}
 
 	static bool WiFi_upload(Device const device, SerialNumber const serial, struct Data const *const data) {
 		signed int const WiFi_status = WiFi.status();
@@ -1748,8 +1755,11 @@ static bool setup_error;
 			Device packet_type;
 			if (LoRa.readBytes(&packet_type, sizeof packet_type) != sizeof packet_type) return;
 			switch (packet_type) {
+			case PACKET_TIME:
+				break;
 			case PACKET_ASKTIME:
 				receive_ASKTIME(packet_size);
+				break;
 			case PACKET_SEND:
 				receive_SEND(packet_size);
 				break;
@@ -1800,13 +1810,29 @@ static bool setup_error;
 		#ifdef ENABLE_CLOCK
 			if (!setup_error) {
 				setup_error = RTC::initialize();
-				NTP.begin();
-				NTP.setUpdateInterval(SYNCHONIZE_INTERVAL);
 			}
 		#endif
 
+		if (!setup_error) {
+			NTP.begin();
+			NTP.setUpdateInterval(SYNCHONIZE_INTERVAL);
+		}
+
 		/* display setup result on OLED */
 		OLED_display();
+	}
+
+	static void loop_WiFi(void) {
+		static wl_status_t last_WiFi = WL_IDLE_STATUS;
+		wl_status_t this_WiFi = WiFi.status();
+		if (this_WiFi != last_WiFi) {
+			Serial_print("WiFi status: ");
+			Serial_println(WiFi.status());
+			last_WiFi = this_WiFi;
+		}
+		if (this_WiFi == WL_CONNECTED) {
+			RTC::synchronize_NTP();
+		}
 	}
 
 	void loop() {
@@ -1815,7 +1841,7 @@ static bool setup_error;
 			return;
 		}
 		LORA::receive(LoRa.parsePacket());
-		RTC::synchronize_NTP();
+		loop_WiFi();
 		schedules.tick();
 		RNG.loop();
 	}
