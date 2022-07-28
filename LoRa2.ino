@@ -419,7 +419,6 @@ static class String String_from_FullTime(struct FullTime const *const fulltime) 
 			Time const period_0 = wake_time - now;
 			Time const period_1 = wake - now;
 			if (!in_range(period_0)) return;
-			if (0 < period_1 && period_1 < MAXIMUM_SLEEP_LENGTH || period_0 <= period_1) return;
 			if (!in_range(period_1) || period_0 <= period_1) return;
 		}
 		enabled = true;
@@ -429,9 +428,9 @@ static class String String_from_FullTime(struct FullTime const *const fulltime) 
 	void Sleeper::sleep(void) {
 		if (!enabled || wait_ack || wait_synchronization) return;
 		Time const now = millis();
-		LoRa.sleep();
 		Time const milliseconds = wake_time - now - SLEEP_MARGIN;
 		if (milliseconds < MAXIMUM_SLEEP_LENGTH) {
+			LoRa.sleep();
 			esp_sleep_enable_timer_wakeup(1000 * milliseconds);
 			esp_light_sleep_start();
 		}
@@ -1297,6 +1296,11 @@ static bool setup_error;
 
 		/* display setup result on OLED */
 		OLED_display();
+
+		/* Flush serial port */
+		#ifdef ENABLE_COM_OUTPUT
+			Serial.flush();
+		#endif
 	}
 
 	namespace LORA {
