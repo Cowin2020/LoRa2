@@ -58,6 +58,7 @@ LoRa sender and receiver
 
 /* For Debug */
 //	#define DEBUG_CLEAN_OLD_DATA
+//	static class Print &debug = Serial;
 
 /* ************************************************************************** */
 
