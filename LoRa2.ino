@@ -875,7 +875,7 @@ static bool setup_error;
 		inline AskTime::AskTime(void) : Schedule(SYNCHONIZE_INTERVAL), wait_response(false) {}
 
 		void AskTime::start(Time const now) {
-			Schedule::start(now, rand_int<uint8_t>());
+			Schedule::start(now - period, rand_int<uint8_t>());
 		}
 
 		void AskTime::run(Time const now) {
