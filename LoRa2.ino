@@ -1715,6 +1715,7 @@ static bool setup_error;
 				OLED_println(OLED_message);
 				OLED_message = "";
 				OLED_display();
+				return;
 			}
 
 			Device router;
