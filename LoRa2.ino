@@ -910,7 +910,7 @@ static bool setup_error;
 
 	#ifdef ENABLE_SD_CARD
 		namespace IO {
-			static void writeln_Data /* FIX: stupid "feature" of Arduino IDE */ (class Print *const print, struct Data const *const data) {
+			static void writeln_Data(class Print *const print, struct Data const *const data) {
 				print->printf(
 					"%04u-%02u-%02uT%02u:%02u:%02uZ",
 					data->time.year, data->time.month, data->time.day,
@@ -995,22 +995,6 @@ static bool setup_error;
 			}
 		}
 
-		static void dump_log_file(void) {
-			File file = SD.open(data_file_path, "r");
-			if (!file) {
-				Serial_print("Cannot open log file");
-				return;
-			}
-			Serial_println("Log file BEGIN");
-			for (;;) {
-				signed int const c = file.read();
-				if (c < 0) break;
-				Serial_print(char(c));
-			}
-			file.close();
-			Serial_println("Log file END");
-		}
-
 		static void cleanup_data_file(void) {
 			SD.remove(cleanup_file_path);
 			if (!SD.rename(data_file_path, cleanup_file_path)) return;
@@ -1025,26 +1009,30 @@ static bool setup_error;
 				cleanup_file.close();
 				return;
 			}
+
 			for (;;) {
-				class String const s = cleanup_file.readStringUntil(',');
-				if (!s.length()) break;
-				bool const sent = s != "0";
+				#ifdef DEBUG_CLEAN_OLD_DATA
+					signed int const c = file.read();
+					if (c < 0) break;
+					Serial_print(char(c));
+				#else
+					class String const s = cleanup_file.readStringUntil(',');
+					if (!s.length()) break;
+					bool const sent = s != "0";
 
-				struct Data data;
-				if (!IO::readln_Data(&data, &cleanup_file)) {
-					Serial_println("Clean-up: invalid data");
-					break;
-				}
+					struct Data data;
+					if (!IO::readln_Data(&data, &cleanup_file)) {
+						Serial_println("Clean-up: invalid data");
+						break;
+					}
 
-				if (!sent) {
-					#ifdef DEBUG_CLEAN_OLD_DATA
-						data_file.print("1,");
-					#else
+					if (!sent) {
 						data_file.print("0,");
-					#endif
-					IO::writeln_Data(&data_file, &data);
-				}
+						IO::writeln_Data(&data_file, &data);
+					}
+				#endif
 			}
+
 			cleanup_file.close();
 			data_file.close();
 			SD.remove(cleanup_file_path);
@@ -1279,7 +1267,6 @@ static bool setup_error;
 				if (SD.begin(SD_CS, SPI_1)) {
 					any_println("SD card initialized");
 					Serial_println(String("SD Card type: ") + String(SD.cardType()));
-					dump_log_file();
 					cleanup_data_file();
 				} else {
 					setup_error = true;
