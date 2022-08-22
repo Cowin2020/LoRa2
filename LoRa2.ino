@@ -1010,12 +1010,8 @@ static bool setup_error;
 				return;
 			}
 
-			for (;;) {
-				#ifdef DEBUG_CLEAN_OLD_DATA
-					signed int const c = file.read();
-					if (c < 0) break;
-					Serial_print(char(c));
-				#else
+			#ifndef DEBUG_CLEAN_OLD_DATA
+				for (;;) {
 					class String const s = cleanup_file.readStringUntil(',');
 					if (!s.length()) break;
 					bool const sent = s != "0";
@@ -1030,8 +1026,8 @@ static bool setup_error;
 						data_file.print("0,");
 						IO::writeln_Data(&data_file, &data);
 					}
-				#endif
-			}
+				}
+			#endif
 
 			cleanup_file.close();
 			data_file.close();
