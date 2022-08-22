@@ -465,7 +465,9 @@ public:
 	virtual void run(Time now);
 };
 
-inline Schedule::Schedule(Time const initial_period) : enable(false), head(0), period(initial_period), margin(0) {}
+inline Schedule::Schedule(Time const initial_period) :
+	enable(false), head(0), period(initial_period), margin(0)
+{}
 
 inline bool Schedule::enabled(void) const {
 	return enable;
@@ -750,7 +752,6 @@ static bool setup_error;
 	#endif
 
 	static SerialNumber serial_current;
-	static off_t wait_position;
 	Device last_receiver;
 
 	static class Resend : public Schedule {
@@ -872,7 +873,9 @@ static bool setup_error;
 			void reset(void);
 		} ask_time_schedule;
 
-		inline AskTime::AskTime(void) : Schedule(SYNCHONIZE_INTERVAL), wait_response(false) {}
+		inline AskTime::AskTime(void) :
+			Schedule(SYNCHONIZE_INTERVAL), wait_response(false)
+		{}
 
 		void AskTime::start(Time const now) {
 			Schedule::start(now - period, rand_int<uint8_t>());
@@ -998,12 +1001,12 @@ static bool setup_error;
 		static void cleanup_data_file(void) {
 			SD.remove(cleanup_file_path);
 			if (!SD.rename(data_file_path, cleanup_file_path)) return;
-			File cleanup_file = SD.open(cleanup_file_path, "r");
+			class File cleanup_file = SD.open(cleanup_file_path, "r");
 			if (!cleanup_file) {
 				Serial_println("Fail to open clean-up file");
 				return;
 			}
-			File data_file = SD.open(data_file_path, "w");
+			class File data_file = SD.open(data_file_path, "w");
 			if (!data_file) {
 				Serial_println("Fail to create data file");
 				cleanup_file.close();
@@ -1035,7 +1038,7 @@ static bool setup_error;
 		}
 
 		static void append_data_file(struct Data const *const data) {
-			File file = SD.open(data_file_path, "a");
+			class File file = SD.open(data_file_path, "a");
 			if (!file) {
 				any_println("Cannot append data file");
 			} else {
@@ -1047,24 +1050,28 @@ static bool setup_error;
 
 		static class Upload : public Schedule {
 		protected:
-			off_t position;
+			off_t current_position;
+			off_t next_position;
 		public:
 			Upload(void);
 			virtual void run(Time const now);
+			void ack(void);
 		} upload_schedule;
 
-		inline Upload::Upload(void) : Schedule(UPLOAD_INTERVAL), position(0) {}
+		inline Upload::Upload(void) :
+			Schedule(UPLOAD_INTERVAL), current_position(0), next_position(0)
+		{}
 
 		void Upload::run(Time const now) {
 			Schedule::run(now);
-			File data_file = SD.open(DATA_FILE_PATH, "r");
+			class File data_file = SD.open(DATA_FILE_PATH, "r");
 			if (!data_file) {
 				Serial_println("Upload: fail to open data file");
 				return;
 			}
-			if (!data_file.seek(position)) {
+			if (!data_file.seek(current_position)) {
 				Serial_print("Upload: cannot seek: ");
-				Serial_println(position);
+				Serial_println(current_position);
 				data_file.close();
 				return;
 			}
@@ -1079,15 +1086,34 @@ static bool setup_error;
 				}
 
 				if (!sent) {
-					wait_position = position;
-					position = data_file.position();
+					next_position = data_file.position();
 					LORA::send_data(&data);
 					break;
 				}
 
-				position = data_file.position();
+				current_position = data_file.position();
 			}
 			data_file.close();
+		}
+
+		void Upload::ack(void) {
+			if (current_position == next_position) return;
+			class File file = SD.open(data_file_path, "r+");
+			if (!file) {
+				Serial_println("LoRa ACK: fail to open data file");
+				return;
+			}
+			if (!file.seek(current_position)) {
+				Serial_print("LoRa ACK: fail to seek data file: ");
+				Serial_println(current_position);
+				return;
+			}
+			file.write('1');
+			file.close();
+
+			current_position = next_position;
+
+			this->start(millis());
 		}
 	#endif
 
@@ -1390,20 +1416,7 @@ static bool setup_error;
 				if (!resend_schedule.stop_ack(serial)) return;
 
 				#ifdef ENABLE_SD_CARD
-					File file = SD.open(data_file_path, "r+");
-					if (!file) {
-						Serial_println("LoRa ACK: fail to open data file");
-						return;
-					}
-					if (!file.seek(wait_position)) {
-						Serial_print("LoRa ACK: fail to seek data file: ");
-						Serial_println(wait_position);
-						return;
-					}
-					file.write('1');
-					file.close();
-
-					upload_schedule.start(millis());
+					upload_schedule.ack();
 				#endif
 
 				#ifdef ENABLE_OLED_OUTPUT
