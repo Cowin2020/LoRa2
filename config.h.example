@@ -1,0 +1,29 @@
+#undef DEVICE_ID
+#define DEVICE_ID 1
+#undef NUMBER_OF_SENDERS
+#define NUMBER_OF_SENDERS 6
+
+#define ENABLE_LED
+#define ENABLE_COM_OUTPUT
+#define ENABLE_OLED_OUTPUT
+#define ENABLE_CLOCK CLOCK_DS3231
+#define ENABLE_SD_CARD
+#define ENABLE_BME280
+
+#if DEVICE_ID == 0
+	#undef ENABLE_CLOCK
+#endif
+
+#undef WIFI_SSID
+#undef WIFI_PASS
+#define WIFI_SSID "My WiFi ID"
+#define WIFI_PASS "WiFi password"
+
+#undef HTTP_UPLOAD_FORMAT
+#define HTTP_UPLOAD_FORMAT \
+	"http://www.example.com/REST/upload?device=%1$u&time=%3$s" \
+	"&temperature=%4$.1F&pressure=%5$.1F&humidity=%6$.1F"
+#undef HTTP_AUTHORIZATION_TYPE
+#define HTTP_AUTHORIZATION_TYPE "Basic"
+#undef HTTP_AUTHORIZATION_CODE
+#define HTTP_AUTHORIZATION_CODE "API token"

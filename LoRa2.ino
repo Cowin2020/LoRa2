@@ -48,7 +48,7 @@ LoRa sender and receiver
 #define ROUTER_TOPOLOGY {}
 
 /* Hardware Parameters */
-//	#define CPU_FREQUENCY 80
+#define CPU_FREQUENCY 20
 #define COM_BAUD 115200
 #define OLED_WIDTH 128
 #define OLED_HEIGHT 64
