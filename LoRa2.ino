@@ -43,6 +43,7 @@ LoRa sender and receiver
 #define RESEND_TIMES 3
 #define ACK_TIMEOUT 1000UL /* milliseconds */
 #define UPLOAD_INTERVAL 6000UL /* milliseconds */
+#define CLEANLOG_INTERVAL 86400000UL /* milliseconds */
 #define MEASURE_INTERVAL 60000UL /* milliseconds */ /* MUST: > UPLOAD_INTERVAL */
 #define SLEEP_MARGIN 1000 /* milliseconds */
 #define ROUTER_TOPOLOGY {}
@@ -765,7 +766,7 @@ static bool setup_error;
 	public:
 		Resend(void);
 		void start(Time const now);
-		virtual void run(Time const now) override;
+		virtual void run(Time now) override;
 		void start_send(struct Data const *const data);
 		bool stop_ack(SerialNumber const serial);
 	} resend_schedule;
@@ -1054,7 +1055,7 @@ static bool setup_error;
 			off_t next_position;
 		public:
 			Upload(void);
-			virtual void run(Time const now);
+			virtual void run(Time now);
 			void ack(void);
 		} upload_schedule;
 
@@ -1115,12 +1116,25 @@ static bool setup_error;
 
 			this->start(millis());
 		}
+
+		static class CleanLog : public Schedule {
+		public:
+			CleanLog(void);
+			virtual void run(Time now) override;
+		} cleanlog_schedule;
+
+		CleanLog::CleanLog(void) : Schedule(CLEANLOG_INTERVAL) {}
+
+		void CleanLog::run(Time const now) {
+			Schedule::run(now);
+			cleanup_data_file();
+		}
 	#endif
 
 	static class Measure : public Schedule {
 	public:
 		Measure(void);
-		virtual void run(Time const now) override;
+		virtual void run(Time now) override;
 	} measure_schedule;
 
 	inline Measure::Measure(void) : Schedule(MEASURE_INTERVAL) {}
@@ -1212,6 +1226,8 @@ static bool setup_error;
 		#ifdef ENABLE_SD_CARD
 			upload_schedule.start(0);
 			schedules.add(&upload_schedule);
+			cleanlog_schedule.start(0);
+			schedules.add(&cleanlog_schedule);
 		#endif
 		RNG.begin("LoRa-2");
 
@@ -1590,7 +1606,7 @@ static bool setup_error;
 	static class Synchronize : public Schedule {
 	public:
 		Synchronize(void);
-		virtual void run(Time const now);
+		virtual void run(Time now);
 	} synchronize_schedule;
 
 	inline Synchronize::Synchronize(void) : Schedule(SYNCHONIZE_INTERVAL) {}
