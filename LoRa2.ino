@@ -1216,6 +1216,8 @@ static bool setup_error;
 		#ifdef ENABLE_OLED_OUTPUT
 			OLED_message = "";
 		#endif
+
+		/* initialize schedules */
 		measure_schedule.start(0);
 		#ifdef ENABLE_SLEEP
 			ask_time_schedule.start(0);
@@ -1305,7 +1307,10 @@ static bool setup_error;
 				if (SD.begin(SD_CS, SPI_1)) {
 					any_println("SD card initialized");
 					Serial_println(String("SD Card type: ") + String(SD.cardType()));
+					any_println("Cleaning up data file");
+					OLED_display();
 					cleanup_data_file();
+					any_println("Data file cleaned");
 				} else {
 					setup_error = true;
 					any_println("SD card uninitialized");
