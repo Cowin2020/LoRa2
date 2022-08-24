@@ -1,3 +1,21 @@
+Computer for development
+========================
+
+Arduino IDE
+-----------
+
+Versions 1.X.X are tested.
+https://www.arduino.cc/en/software
+
+USB-Enhanced-SERIAL CH9102 COM port driver
+------------------------------------------
+
+Microsoft Windows
+https://github.com/Xinyuan-LilyGO/CH9102_Driver
+
+macOS
+https://github.com/WCHSoftGroup/ch34xser_macos
+
 Libraries used
 ==============
 
@@ -7,15 +25,10 @@ https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32
 Crypto
 ------
 
-Edit libraries/Crypto/src/AES.h
-	remove the usage of "CRYPTO_AES_ESP32"
-	always use "CRYPTO_AES_DEFAULT"
-
-ESP32Time
----------
-
-ESP8266 and ESP32 OLED driver for SSD1306 displays
---------------------------------------------------
+For older version before version 0.4.0:
+	Edit libraries/Crypto/src/AES.h
+		remove the usage of "CRYPTO_AES_ESP32"
+		always use "CRYPTO_AES_DEFAULT"
 
 NTPClient
 ---------
@@ -24,26 +37,57 @@ IDE version does not work.
 It should be installed from github.
 https://github.com/arduino-libraries/NTPClient.git
 
-HTTPClient
-----------
+ESP32Time
+---------
+
+Handle date-time using internal clock
 
 LoRa
 ----
 
+Driver of LoRa
+
+Adafruit SSD1306
+----------------
+
+Driver of SSD1306 OLED display
+
 OneWire
 -------
+
+Driver of 1-wire interface
 
 DallasTemperature
 -----------------
 
+Dallas 1-wire temperature sensor
+
+Adafruit BME280 Library
+-----------------------
+
+BME280 I2C temperature, pressure and humidity sensor
+
+Adafruit LTR390 Library
+-----------------------
+
+LTR390 I2C ambient/ultraviolet light sensor
+
 Grove - High Precision RTC
 --------------------------
+
+PCF85063TP Real-time clock
+
+RTClib
+------
+
+Driver of DS1307 and DS3231 real-time clocks
 
 Configuration
 =============
 
 Create "config.h" in the root directory of repository.
 Define or undefine variables for configuration.
+The file "config.h.example" is an example of "config.h".
 
 DEVICE_ID
 ---------
