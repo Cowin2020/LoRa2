@@ -395,20 +395,22 @@ static class String String_from_FullTime(struct FullTime const *const fulltime) 
 		static Time const MAXIMUM_SLEEP_LENGTH;
 		static bool enabled;
 		static Time wake_time;
+		static bool waiting_ack;
+		static bool waiting_synchronization;
 		bool in_range(Time diff);
 	public:
-		static bool wait_ack;
-		static bool wait_synchronization;
 		Sleeper(void);
 		void alarm(Time now, Time wake);
 		void sleep(void);
+		static void wait_ack(bool value);
+		static void wait_synchronization(bool value);
 	} sleeper;
 
 	Time const Sleeper::MAXIMUM_SLEEP_LENGTH = 24 * 60 * 60 * 1000; /* milliseconds */
 	bool Sleeper::enabled = false;
 	Time Sleeper::wake_time = 0;
-	bool Sleeper::wait_ack = false;
-	bool Sleeper::wait_synchronization = false;
+	bool Sleeper::waiting_ack = false;
+	bool Sleeper::waiting_synchronization = false;
 
 	inline Sleeper::Sleeper(void) {}
 
@@ -428,7 +430,7 @@ static class String String_from_FullTime(struct FullTime const *const fulltime) 
 	}
 
 	void Sleeper::sleep(void) {
-		if (!enabled || wait_ack || wait_synchronization) return;
+		if (!enabled || waiting_ack || waiting_synchronization) return;
 		Time const now = millis();
 		Time const milliseconds = wake_time - now - SLEEP_MARGIN;
 		if (milliseconds < MAXIMUM_SLEEP_LENGTH) {
@@ -438,16 +440,28 @@ static class String String_from_FullTime(struct FullTime const *const fulltime) 
 		}
 		enabled = false;
 	}
+
+	void Sleeper::wait_ack(bool const value) {
+		waiting_ack = value;
+	}
+
+	void Sleeper::wait_synchronization(bool const value) {
+		waiting_synchronization = value;
+	}
 #else
 	class Sleeper {
 	public:
 		Sleeper(void);
 		void alarm(Time now, Time wake);
 		void sleep(void);
+		static void wait_ack(bool value);
+		static void wait_synchronization(bool value);
 	} sleeper;
 	inline Sleeper::Sleeper(void) {}
 	inline void Sleeper::alarm(Time const now, Time const wake) {}
 	inline void Sleeper::sleep(void) {}
+	inline void Sleeper::wait_ack(bool value) {}
+	inline void Sleeper::wait_synchronization(bool value) {}
 #endif
 
 class Schedule {
@@ -845,7 +859,7 @@ static bool setup_error;
 		this->serial = serial_current;
 		++serial_current;
 		this->data = *data;
-		Sleeper::wait_ack = true;
+		Sleeper::wait_ack(true);
 		Time const now = millis();
 		start(now);
 		run(now);
@@ -853,7 +867,7 @@ static bool setup_error;
 
 	bool Resend::stop_ack(SerialNumber const serial) {
 		if (serial == this->serial) {
-			Sleeper::wait_ack = false;
+			Sleeper::wait_ack(false);
 			last_receiver = receiver;
 			stop();
 			return true;
@@ -887,7 +901,7 @@ static bool setup_error;
 			if (!wait_response) {
 				wait_response = true;
 				period = SYNCHONIZE_MARGIN;
-				Sleeper::wait_synchronization = true;
+				Sleeper::wait_synchronization(true);
 				LoRa.beginPacket();
 				LoRa.write(uint8_t(PACKET_ASKTIME));
 				LoRa.write(uint8_t(last_receiver));
@@ -902,7 +916,7 @@ static bool setup_error;
 		void AskTime::reset(void) {
 			wait_response = false;
 			period = SYNCHONIZE_INTERVAL;
-			Sleeper::wait_synchronization = false;
+			Sleeper::wait_synchronization(false);
 		}
 	#endif
 
