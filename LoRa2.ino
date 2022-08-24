@@ -1626,6 +1626,11 @@ static bool setup_error;
 		LoRa.write(Device(0));
 		LORA::send_payload("TIME", &payload, sizeof payload);
 		LoRa.endPacket(true);
+
+		OLED_home();
+		any_println("Synchronize: ");
+		any_println(String_from_FullTime(&payload));
+		OLED_display();
 	}
 
 	namespace LORA {
@@ -1643,6 +1648,7 @@ static bool setup_error;
 				Serial_println(packet_size);
 				return;
 			}
+
 			Device receiver;
 			if (LoRa.readBytes(&receiver, sizeof receiver) != sizeof receiver) return;
 			if (receiver != (Device)0) return;
@@ -1724,11 +1730,9 @@ static bool setup_error;
 			#endif
 
 			if (!WiFi_upload(device, serial, &data)) {
-				#ifdef ENABLE_OLED_OUTPUT
-					OLED_println(WiFi_status_message(WiFi.status()));
-					OLED_print("HTTP: ");
-					OLED_println(HTTP_status);
-				#endif
+				OLED_println(WiFi_status_message(WiFi.status()));
+				OLED_print("HTTP: ");
+				OLED_println(HTTP_status);
 				OLED_println(OLED_message);
 				OLED_message = "";
 				OLED_display();
