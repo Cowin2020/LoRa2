@@ -1511,7 +1511,6 @@ static bool setup_error;
 	#include <NTPClient.h>
 
 	static SerialNumber serial_last[NUMBER_OF_SENDERS];
-	static signed int HTTP_status;
 	static class WiFiUDP WiFiUDP;
 	static class NTPClient NTP(WiFiUDP, NTP_SERVER);
 
@@ -1554,10 +1553,34 @@ static bool setup_error;
 		}
 	}
 
+	static class String WiFi_status_message(signed int const WiFi_status) {
+		switch (WiFi_status) {
+		case WL_NO_SHIELD:
+			return String("WiFi no shield");
+		case WL_IDLE_STATUS:
+			return String("WiFi idle");
+		case WL_NO_SSID_AVAIL:
+			return String("WiFi no SSID");
+		case WL_SCAN_COMPLETED:
+			return String("WiFi scan completed");
+		case WL_CONNECTED:
+			return String("WiFi connected");
+		case WL_CONNECT_FAILED:
+			return String("WiFi connect failed");
+		case WL_CONNECTION_LOST:
+			return String("WiFi connection lost");
+		case WL_DISCONNECTED:
+			return String("WiFi disconnected");
+		default:
+			return String("WiFi Status: ") + String(WiFi_status);
+		}
+	}
+
 	static bool WiFi_upload(Device const device, SerialNumber const serial, struct Data const *const data) {
 		signed int const WiFi_status = WiFi.status();
 		if (WiFi_status != WL_CONNECTED) {
-			Serial_println("Upload no WiFi");
+			any_print("WiFi: ");
+			any_println(WiFi_status_message(WiFi.status()));
 			return false;
 		}
 		class String const time = String_from_FullTime(&data->time);
@@ -1592,34 +1615,11 @@ static bool setup_error;
 			HTTP_client.setAuthorizationType(authorization_type);
 			HTTP_client.setAuthorization(authorization_code);
 		}
-		HTTP_status = HTTP_client.GET();
-		Serial_print("HTTP status: ");
-		Serial_println(HTTP_status);
+		signed int HTTP_status = HTTP_client.GET();
+		any_print("HTTP status: ");
+		any_println(HTTP_status);
 		if (not (HTTP_status >= 200 and HTTP_status < 300)) return false;
 		return true;
-	}
-
-	static class String WiFi_status_message(signed int const WiFi_status) {
-		switch (WiFi_status) {
-		case WL_NO_SHIELD:
-			return String("WiFi no shield");
-		case WL_IDLE_STATUS:
-			return String("WiFi idle");
-		case WL_NO_SSID_AVAIL:
-			return String("WiFi no SSID");
-		case WL_SCAN_COMPLETED:
-			return String("WiFi scan completed");
-		case WL_CONNECTED:
-			return String("WiFi connected");
-		case WL_CONNECT_FAILED:
-			return String("WiFi connect failed");
-		case WL_CONNECTION_LOST:
-			return String("WiFi connection lost");
-		case WL_DISCONNECTED:
-			return String("WiFi disconnected");
-		default:
-			return String("WiFi Status: ") + String(WiFi_status);
-		}
 	}
 
 	static class Synchronize : public Schedule {
@@ -1741,30 +1741,6 @@ static bool setup_error;
 			serial_last[device-1] = serial;
 			#ifdef ENABLE_OLED_OUTPUT
 				OLED_home();
-			#endif
-
-			if (!WiFi_upload(device, serial, &data)) {
-				OLED_println(WiFi_status_message(WiFi.status()));
-				OLED_print("HTTP: ");
-				OLED_println(HTTP_status);
-				OLED_println(OLED_message);
-				OLED_message = "";
-				OLED_display();
-				return;
-			}
-
-			Device router;
-			std::memcpy(&router, payload + sizeof device, sizeof router);
-
-			LoRa.beginPacket();
-			LoRa.write(PacketType(PACKET_ACK));
-			LoRa.write(router);
-			LORA::send_payload("ACK", payload, sizeof (Device) * (1 + routers_length) + sizeof (SerialNumber));
-			LoRa.endPacket(true);
-
-			#ifdef ENABLE_OLED_OUTPUT
-				signed int const WiFi_status = WiFi.status();
-				OLED_print("Device ");
 				OLED_print(device);
 				OLED_print(" Serial ");
 				OLED_println(serial);
@@ -1785,10 +1761,22 @@ static bool setup_error;
 					OLED_print("LTR UV: ");
 					OLED_println(data.ltr390_ultraviolet);
 				#endif
-				OLED_println(OLED_message);
-				OLED_message = "";
 				OLED_display();
 			#endif
+
+			if (!WiFi_upload(device, serial, &data)) {
+				OLED_display();
+				return;
+			}
+
+			Device router;
+			std::memcpy(&router, payload + sizeof device, sizeof router);
+
+			LoRa.beginPacket();
+			LoRa.write(PacketType(PACKET_ACK));
+			LoRa.write(router);
+			LORA::send_payload("ACK", payload, sizeof (Device) * (1 + routers_length) + sizeof (SerialNumber));
+			LoRa.endPacket(true);
 		}
 
 		static void receive(signed int const packet_size) {
@@ -1818,7 +1806,6 @@ static bool setup_error;
 	void setup() {
 		/* initialize internal states */
 		setup_error = false;
-		HTTP_status = 0;
 		for (size_t i = 0; i < NUMBER_OF_SENDERS; ++i)
 			serial_last[i] = 0;
 		synchronize_schedule.start(0);

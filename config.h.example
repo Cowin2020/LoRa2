@@ -11,7 +11,9 @@
 #define ENABLE_BME280
 
 #if DEVICE_ID == 0
+	#undef ENABLE_SLEEP
 	#undef ENABLE_CLOCK
+#else
 #endif
 
 #undef WIFI_SSID
