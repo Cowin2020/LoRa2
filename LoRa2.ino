@@ -1131,18 +1131,21 @@ static bool setup_error;
 			this->start(millis());
 		}
 
-		static class CleanLog : public Schedule {
-		public:
-			CleanLog(void);
-			virtual void run(Time now) override;
-		} cleanlog_schedule;
+		#if defined(CLEANLOG_INTERVAL) && CLEANLOG_INTERVAL > 0
+			#error OK!
+			static class CleanLog : public Schedule {
+			public:
+				CleanLog(void);
+				virtual void run(Time now) override;
+			} cleanlog_schedule;
 
-		CleanLog::CleanLog(void) : Schedule(CLEANLOG_INTERVAL) {}
+			CleanLog::CleanLog(void) : Schedule(CLEANLOG_INTERVAL) {}
 
-		void CleanLog::run(Time const now) {
-			Schedule::run(now);
-			cleanup_data_file();
-		}
+			void CleanLog::run(Time const now) {
+				Schedule::run(now);
+				cleanup_data_file();
+			}
+		#endif
 	#endif
 
 	static class Measure : public Schedule {
@@ -1242,8 +1245,10 @@ static bool setup_error;
 		#ifdef ENABLE_SD_CARD
 			upload_schedule.start(0);
 			schedules.add(&upload_schedule);
-			cleanlog_schedule.start(0);
-			schedules.add(&cleanlog_schedule);
+			#if defined(CLEANLOG_INTERVAL) && CLEANLOG_INTERVAL > 0
+				cleanlog_schedule.start(0);
+				schedules.add(&cleanlog_schedule);
+			#endif
 		#endif
 		RNG.begin("LoRa-2");
 
@@ -1579,7 +1584,7 @@ static bool setup_error;
 	static bool WiFi_upload(Device const device, SerialNumber const serial, struct Data const *const data) {
 		signed int const WiFi_status = WiFi.status();
 		if (WiFi_status != WL_CONNECTED) {
-			any_print("WiFi: ");
+			any_print("No WiFi: ");
 			any_println(WiFi_status_message(WiFi.status()));
 			return false;
 		}

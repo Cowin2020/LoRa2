@@ -268,6 +268,15 @@ This value should be larger than (ACK_TIMEOUT * (RESEND_TIMES + 1)).
 Type: natural number
 Default: (ACK_TIMEOUT * (RESEND_TIMES + 2))
 
+CLEANLOG_INTERVAL
+-----------------
+
+Period in milliseconds to clear data file on SD card
+
+It can be undefined or set to zero to disable this function.
+
+Type: undefined or natural number
+
 MEASURE_INTERVAL
 --------------
 
