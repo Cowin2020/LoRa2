@@ -33,6 +33,8 @@ For older version before version 0.4.0:
 NTPClient
 ---------
 
+Synchronize real-time clock from NTP server.
+
 IDE version does not work.
 It should be installed from github.
 https://github.com/arduino-libraries/NTPClient.git
@@ -57,6 +59,8 @@ OneWire
 
 Driver of 1-wire interface
 
+It is used by dallas temperature sensor.
+
 DallasTemperature
 -----------------
 
@@ -75,7 +79,7 @@ LTR390 I2C ambient/ultraviolet light sensor
 Grove - High Precision RTC
 --------------------------
 
-PCF85063TP Real-time clock
+Driver of PCF85063TP Real-time clock
 
 RTClib
 ------
@@ -99,7 +103,7 @@ Each device should have a unique ID.
 Type: Single byte integer
 Values:
 	0
-	     LoRa-WiFi gateway
+		LoRa-WiFi gateway
 	1-255
 		terminal measuring device
 
@@ -113,7 +117,7 @@ Values: 1-255
 ENABLE_LED
 ----------
 
-Flash LED on error
+Blink on board LED on error
 
 Type: defined or undefined
 
@@ -143,6 +147,8 @@ Values:
 		Grove high precision real-time clock
 	CLOCK_DS1307
 		DS1307 real-time clock
+	CLOCK_DS3231
+		DS3231 real-time clock
 
 ENABLE_SD_CARD
 --------------
@@ -228,7 +234,7 @@ Secret key for encryption of LoRa communication
 
 Need to be same for both gateway and terminal sides.
 
-Type: anything with 16 bytes size
+Type: string or byte array with 16-byte size
 
 DATA_FILE_PATH
 -------------
