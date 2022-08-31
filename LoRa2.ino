@@ -1132,7 +1132,6 @@ static bool setup_error;
 		}
 
 		#if defined(CLEANLOG_INTERVAL) && CLEANLOG_INTERVAL > 0
-			#error OK!
 			static class CleanLog : public Schedule {
 			public:
 				CleanLog(void);
