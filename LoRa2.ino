@@ -662,7 +662,7 @@ namespace LORA {
 
 struct [[gnu::packed]] Data {
 	struct FullTime time;
-	#if ENABLE_BATTERY_GAUGE == BATTERY_GAUGE_DFROBOT || ENABLE_BATTERY_GAUGE == BATTERY_GAUGE_LC709203F
+	#ifdef ENABLE_BATTERY_GAUGE
 		float battery_voltage;
 		float battery_percentage;
 	#endif
@@ -938,6 +938,9 @@ static bool setup_error;
 					data->time.year, data->time.month, data->time.day,
 					data->time.hour, data->time.minute, data->time.second
 				);
+				#ifdef ENABLE_BATTERY_GAUGE
+					print->printf(",%f,%f\n", data->battery_voltage, data->battery_percentage);
+				#endif
 				#ifdef ENABLE_DALLAS
 					print->printf(",%f\n", data->dallas_temperature);
 				#endif
@@ -972,7 +975,24 @@ static bool setup_error;
 						) != 6
 					) return false;
 				}
-				/* Dallas Thermometer */
+				/* Battery gauge */
+				#ifdef ENABLE_BATTERY_GAUGE
+					{
+						class String const s = stream->readStringUntil(',');
+						if (sscanf(s.c_str(), "%f", &data->battery_voltage) != 1) return false;
+					}
+					{
+						class String const s = stream->readStringUntil(
+							#if defined(ENABLE_DALLAS) || defined(ENABLE_BME280) || defined(ENABLE_LTR390)
+								','
+							#else
+								'\n'
+							#endif
+						);
+						if (sscanf(s.c_str(), "%f", &data->battery_percentage) != 1) return false;
+					}
+				#endif
+				/* Dallas thermometer */
 				#ifdef ENABLE_DALLAS
 					{
 						class String const s = stream->readStringUntil(
@@ -1189,7 +1209,7 @@ static bool setup_error;
 				data.battery_voltage = battery.cellVoltage();
 				data.battery_percentage = battery.cellPercent();
 			#endif
-			any_print("Battery ");
+			any_print("Battery: ");
 			any_print(data.battery_voltage);
 			any_print("V ");
 			any_print(data.battery_percentage);
@@ -1274,7 +1294,7 @@ static bool setup_error;
 		OLED_initialize();
 
 		/* Initial battery gauge */
-		#if ENABLE_BATTERY_GAUGE == BATTERY_GAUGE_DFROBOT || ENABLE_BATTERY_GAUGE == BATTERY_GAUGE_LC709203F
+		#ifdef ENABLE_BATTERY_GAUGE
 			battery.begin();
 		#endif
 
