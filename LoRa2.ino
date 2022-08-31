@@ -877,6 +877,15 @@ static bool setup_error;
 		}
 	}
 
+	static void send_ask_time(void) {
+		LoRa.beginPacket();
+		LoRa.write(uint8_t(PACKET_ASKTIME));
+		LoRa.write(uint8_t(last_receiver));
+		Device const device = DEVICE_ID;
+		LORA::send_payload("ASKTIME", &device, sizeof device);
+		LoRa.endPacket(true);
+	}
+
 	#ifdef ENABLE_SLEEP
 		class AskTime : public Schedule {
 		protected:
@@ -902,12 +911,7 @@ static bool setup_error;
 				wait_response = true;
 				period = SYNCHONIZE_MARGIN;
 				Sleeper::wait_synchronization(true);
-				LoRa.beginPacket();
-				LoRa.write(uint8_t(PACKET_ASKTIME));
-				LoRa.write(uint8_t(last_receiver));
-				Device const device = DEVICE_ID;
-				LORA::send_payload("ASKTIME", &device, sizeof device);
-				LoRa.endPacket(true);
+				send_ask_time();
 			} else {
 				reset();
 			}
@@ -1349,6 +1353,10 @@ static bool setup_error;
 		/* Flush serial port */
 		#ifdef ENABLE_COM_OUTPUT
 			Serial.flush();
+		#endif
+
+		#ifndef ENABLE_SLEEP
+			send_ask_time();
 		#endif
 	}
 
