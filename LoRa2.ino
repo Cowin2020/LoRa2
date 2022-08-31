@@ -1847,6 +1847,7 @@ static bool setup_error;
 
 		if (!setup_error) {
 			NTP.begin();
+			NTP.forceUpdate();
 			NTP.setUpdateInterval(SYNCHONIZE_INTERVAL);
 		}
 
