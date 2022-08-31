@@ -54,6 +54,16 @@ Adafruit SSD1306
 
 Driver of SSD1306 OLED display
 
+Grove - High Precision RTC
+--------------------------
+
+Driver of PCF85063TP Real-time clock
+
+RTClib
+------
+
+Driver of DS1307 and DS3231 real-time clocks
+
 OneWire
 -------
 
@@ -76,17 +86,17 @@ Adafruit LTR390 Library
 
 LTR390 I2C ambient/ultraviolet light sensor
 
-Grove - High Precision RTC
---------------------------
+DFRobot_MAX17043
+----------------
 
-Driver of PCF85063TP Real-time clock
+MAX17043 battery gauge
 
-RTClib
-------
+Adafruit LC709203F
+------------------
 
-Driver of DS1307 and DS3231 real-time clocks
+LC709203F battery gauge
 
-Configuration
+CONFIGURATION
 =============
 
 Create "config.h" in the root directory of repository.
@@ -315,6 +325,7 @@ The topology will be:
 
 Device 1 sends data through device 2 or directly sends to device 0 (gateway device).
 Device 4 only sends data through device 2, and device 3 only send through device 4.
+Devices send only to device 0 by default if not listed.
 
 SLEEP_MARGIN
 ------------
