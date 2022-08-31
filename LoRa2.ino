@@ -1757,6 +1757,13 @@ static bool setup_error;
 				OLED_print(" Serial ");
 				OLED_println(serial);
 				OLED_println(String_from_FullTime(&data.time));
+				#ifdef ENABLE_BATTERY_GAUGE
+					OLED_print("Battery:");
+					OLED_print(data.battery_voltage);
+					OLED_print("V ");
+					OLED_print(data.battery_percentage);
+					OLED_println('%');
+				#endif
 				#ifdef ENABLE_DALLAS
 					OLED_print("Dallas temp.: ");
 					OLED_println(data.dallas_temperature);
