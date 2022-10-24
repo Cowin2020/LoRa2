@@ -939,10 +939,10 @@ static bool setup_error;
 					data->time.hour, data->time.minute, data->time.second
 				);
 				#ifdef ENABLE_BATTERY_GAUGE
-					print->printf(",%f,%f\n", data->battery_voltage, data->battery_percentage);
+					print->printf(",%f,%f", data->battery_voltage, data->battery_percentage);
 				#endif
 				#ifdef ENABLE_DALLAS
-					print->printf(",%f\n", data->dallas_temperature);
+					print->printf(",%f", data->dallas_temperature);
 				#endif
 				#ifdef ENABLE_BME280
 					print->printf(
